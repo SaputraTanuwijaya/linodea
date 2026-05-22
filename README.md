@@ -4,7 +4,10 @@ Linodea is a local-first desktop reminder app for fast capture and preparation-a
 
 Status: early MVP skeleton. The repository currently includes the desktop shell,
 quick capture shell v0, shared types, deterministic parser v0, and a first local
-SQLite persistence slice.
+SQLite data layer with status and due-reminder queries. It also has a first
+Tauri desktop integration slice: tray icon, close-to-tray, and native window
+show/hide commands. Global shortcut v0 registers `Ctrl+Alt+Space` to show and
+focus the capture window.
 
 ## Category
 
@@ -30,11 +33,12 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 
 ## Planned MVP Features
 
-- Global shortcut capture.
+- Global shortcut capture (`Ctrl+Alt+Space`).
 - Quick capture window.
 - Deterministic reminder parser.
 - Raw input preservation.
 - Local SQLite storage.
+- Tray/background window behavior.
 - Local desktop notifications.
 - Simple reminder history.
 - Roadmap-style view for prep, main, and follow-up chains.

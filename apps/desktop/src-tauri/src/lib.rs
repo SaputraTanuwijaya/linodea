@@ -1,4 +1,6 @@
 mod data;
+mod desktop;
+mod shortcut;
 
 use std::sync::Mutex;
 
@@ -78,6 +80,16 @@ fn get_local_schema_version(state: tauri::State<'_, AppState>) -> Result<i64, St
     store.schema_version()
 }
 
+#[tauri::command]
+fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_main_window(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn hide_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::hide_main_window(&app).map_err(|error| error.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -85,6 +97,8 @@ pub fn run() {
             app.manage(AppState {
                 reminders: Mutex::new(store),
             });
+            desktop::setup_desktop_integration(app)?;
+            shortcut::setup_global_shortcut(app)?;
 
             Ok(())
         })
@@ -94,7 +108,9 @@ pub fn run() {
             list_due_reminder_nodes,
             update_reminder_node_status,
             get_local_database_path,
-            get_local_schema_version
+            get_local_schema_version,
+            show_main_window,
+            hide_main_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

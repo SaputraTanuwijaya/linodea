@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseReminder } from "@linodea/parser";
-import type { ReminderNode, ReminderParseResult } from "@linodea/types";
+import type {
+  ReminderNode,
+  ReminderParseResult,
+  ReminderStatus,
+} from "@linodea/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
@@ -8,12 +12,22 @@ import "./App.css";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 
+interface ReminderStatusPatch {
+  id: string;
+  status: ReminderStatus;
+  updatedAt: string;
+  completedAt?: string;
+  snoozedUntil?: string;
+}
+
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState("");
   const [reminders, setReminders] = useState<ReminderNode[]>([]);
+  const [dueReminderCount, setDueReminderCount] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Local storage is idle.");
   const [isSaving, setIsSaving] = useState(false);
+  const [updatingReminderId, setUpdatingReminderId] = useState<string>();
 
   const parsedReminder = useMemo(
     () => (input.trim() ? parseReminder(input) : undefined),
@@ -28,7 +42,16 @@ function App() {
       return;
     }
 
-    void refreshReminders(setReminders, setStatusMessage);
+    void refreshLocalData(setReminders, setDueReminderCount, setStatusMessage);
+  }, []);
+
+  useEffect(() => {
+    function handleWindowFocus() {
+      focusCaptureInput(inputRef.current);
+    }
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
   }, []);
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -36,10 +59,15 @@ function App() {
       return;
     }
 
+    event.preventDefault();
+
     if (input.length > 0) {
       setInput("");
       setStatusMessage("Capture cleared.");
+      return;
     }
+
+    void hideMainWindow(setStatusMessage);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -69,16 +97,50 @@ function App() {
       const reminder = createReminderNode(parsedReminder, getDeviceId());
       await invoke<ReminderNode>("create_reminder_node", { reminder });
       setInput("");
-      await refreshReminders(
+      await refreshLocalData(
         setReminders,
+        setDueReminderCount,
         setStatusMessage,
         "Reminder saved locally.",
       );
+      await hideMainWindow(setStatusMessage);
       focusCaptureInput(inputRef.current);
     } catch (error) {
       setStatusMessage(toDisplayError(error));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleMarkDone(reminder: ReminderNode) {
+    if (!isTauriRuntime()) {
+      setStatusMessage("Status updates need the desktop runtime.");
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+    const patch: ReminderStatusPatch = {
+      id: reminder.id,
+      status: "done",
+      updatedAt: completedAt,
+      completedAt,
+    };
+
+    setUpdatingReminderId(reminder.id);
+    setStatusMessage("Updating reminder...");
+
+    try {
+      await invoke<ReminderNode>("update_reminder_node_status", { patch });
+      await refreshLocalData(
+        setReminders,
+        setDueReminderCount,
+        setStatusMessage,
+        "Reminder marked done.",
+      );
+    } catch (error) {
+      setStatusMessage(toDisplayError(error));
+    } finally {
+      setUpdatingReminderId(undefined);
     }
   }
 
@@ -92,7 +154,9 @@ function App() {
               Quick capture
             </h1>
           </div>
-          <p className="text-sm text-zinc-500">{reminders.length} local</p>
+          <p className="text-sm text-zinc-500">
+            {reminders.length} local / {dueReminderCount} due
+          </p>
         </header>
 
         <form
@@ -150,11 +214,23 @@ function App() {
                   className="rounded-md border border-zinc-200 bg-white px-3 py-2 shadow-sm"
                   key={reminder.id}
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="font-medium text-zinc-950">{reminder.title}</p>
-                    <p className="text-sm text-zinc-500">
-                      {formatDateTime(reminder.scheduledAt)}
-                    </p>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-zinc-950">{reminder.title}</p>
+                      <p className="text-sm text-zinc-500">
+                        {formatDateTime(reminder.scheduledAt)}
+                      </p>
+                    </div>
+                    {isActionableReminderStatus(reminder.status) ? (
+                      <button
+                        className="h-8 rounded-md border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={updatingReminderId === reminder.id}
+                        onClick={() => void handleMarkDone(reminder)}
+                        type="button"
+                      >
+                        {updatingReminderId === reminder.id ? "Saving" : "Done"}
+                      </button>
+                    ) : null}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
@@ -163,7 +239,7 @@ function App() {
                     <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
                       {reminder.status}
                     </span>
-                    <p className="min-w-0 text-sm text-zinc-500">
+                    <p className="text-sm text-zinc-500">
                       {reminder.rawInput}
                     </p>
                   </div>
@@ -220,15 +296,35 @@ function ParsePreview({ parseResult }: { parseResult: ReminderParseResult }) {
   );
 }
 
-async function refreshReminders(
+async function refreshLocalData(
   setReminders: (reminders: ReminderNode[]) => void,
+  setDueReminderCount: (count: number) => void,
   setStatusMessage: (message: string) => void,
   successMessage = "Local SQLite storage is ready.",
 ) {
   try {
-    const reminders = await invoke<ReminderNode[]>("list_reminder_nodes");
+    const now = new Date().toISOString();
+    const [reminders, dueReminders] = await Promise.all([
+      invoke<ReminderNode[]>("list_reminder_nodes"),
+      invoke<ReminderNode[]>("list_due_reminder_nodes", { now }),
+    ]);
     setReminders(reminders);
+    setDueReminderCount(dueReminders.length);
     setStatusMessage(successMessage);
+  } catch (error) {
+    setStatusMessage(toDisplayError(error));
+  }
+}
+
+async function hideMainWindow(
+  setStatusMessage: (message: string) => void,
+): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+
+  try {
+    await invoke("hide_main_window");
   } catch (error) {
     setStatusMessage(toDisplayError(error));
   }
@@ -279,6 +375,10 @@ function formatDateTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function isActionableReminderStatus(status: ReminderStatus): boolean {
+  return status === "pending" || status === "missed" || status === "snoozed";
 }
 
 function focusCaptureInput(input: HTMLInputElement | null) {
