@@ -3,7 +3,8 @@
 Linodea is a local-first desktop reminder app for fast capture and preparation-aware reminder chains.
 
 Status: early MVP skeleton. The repository currently includes the desktop shell,
-shared types, deterministic parser v0, and a first local SQLite persistence slice.
+quick capture shell v0, shared types, deterministic parser v0, and a first local
+SQLite persistence slice.
 
 ## Category
 
