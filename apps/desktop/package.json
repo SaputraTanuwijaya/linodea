@@ -4,8 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build -w @linodea/parser",
     "dev": "vite",
     "build": "tsc && vite build",
+    "pretypecheck": "npm run build -w @linodea/parser",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -13,6 +15,8 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@linodea/parser": "0.1.0",
+    "@linodea/types": "0.1.0",
     "@tauri-apps/api": "^2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
