@@ -1,0 +1,53 @@
+# Planning and local Codex workspace
+docs/
+.codex/
+
+# Dependencies
+node_modules/
+
+# JavaScript and Vite outputs
+dist/
+dist-ssr/
+build/
+.vite/
+
+# Rust and Tauri outputs
+target/
+**/src-tauri/target/
+
+# Generated Tauri schema files
+**/src-tauri/gen/schemas/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

@@ -1,0 +1,21 @@
+{
+  "name": "linodea",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11.3.0",
+  "engines": {
+    "node": ">=22.14.0",
+    "npm": ">=11.3.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "desktop:dev": "npm run tauri:dev -w @linodea/desktop",
+    "desktop:build": "npm run tauri:build -w @linodea/desktop",
+    "desktop:typecheck": "npm run typecheck -w @linodea/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  }
+}
