@@ -16,6 +16,7 @@
     "desktop:build": "npm run tauri:build -w @linodea/desktop",
     "desktop:typecheck": "npm run typecheck -w @linodea/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspaces --if-present"
   }
 }
