@@ -4,7 +4,15 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 const SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS reminder_nodes (
   id TEXT PRIMARY KEY,
   user_id TEXT,
@@ -75,6 +83,16 @@ pub struct ReminderNode {
     pub snoozed_until: Option<String>,
     pub created_on_device_id: String,
     pub sync_version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderStatusPatch {
+    pub id: String,
+    pub status: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
+    pub snoozed_until: Option<String>,
 }
 
 pub struct ReminderStore {
@@ -209,10 +227,135 @@ impl ReminderStore {
         Ok(reminders)
     }
 
+    pub fn list_due_reminders(&self, now: &str) -> Result<Vec<ReminderNode>, String> {
+        if now.trim().is_empty() {
+            return Err("Due reminder query time is required.".to_string());
+        }
+
+        let mut statement = self
+            .connection
+            .prepare(
+                r#"
+                SELECT
+                  id,
+                  user_id,
+                  title,
+                  raw_input,
+                  description,
+                  scheduled_at,
+                  timezone,
+                  reminder_type,
+                  status,
+                  category,
+                  parent_id,
+                  previous_id,
+                  next_id,
+                  checklist_json,
+                  confidence,
+                  created_at,
+                  updated_at,
+                  completed_at,
+                  snoozed_until,
+                  created_on_device_id,
+                  sync_version
+                FROM reminder_nodes
+                WHERE
+                  (status = 'pending' AND scheduled_at <= ?1)
+                  OR (status = 'snoozed' AND snoozed_until IS NOT NULL AND snoozed_until <= ?1)
+                ORDER BY COALESCE(snoozed_until, scheduled_at) ASC, created_at ASC
+                "#,
+            )
+            .map_err(to_store_error)?;
+
+        let rows = statement
+            .query_map(params![now], reminder_from_row)
+            .map_err(to_store_error)?;
+        let mut reminders = Vec::new();
+
+        for row in rows {
+            reminders.push(row.map_err(to_store_error)?);
+        }
+
+        Ok(reminders)
+    }
+
+    pub fn update_reminder_status(
+        &self,
+        patch: ReminderStatusPatch,
+    ) -> Result<ReminderNode, String> {
+        validate_status_patch(&patch)?;
+
+        let completed_at = if patch.status == "done" {
+            Some(
+                patch
+                    .completed_at
+                    .clone()
+                    .unwrap_or_else(|| patch.updated_at.clone()),
+            )
+        } else {
+            None
+        };
+        let snoozed_until = if patch.status == "snoozed" {
+            patch.snoozed_until.clone()
+        } else {
+            None
+        };
+        let changed = self
+            .connection
+            .execute(
+                r#"
+                UPDATE reminder_nodes
+                SET
+                  status = ?2,
+                  updated_at = ?3,
+                  completed_at = ?4,
+                  snoozed_until = ?5,
+                  sync_version = sync_version + 1
+                WHERE id = ?1
+                "#,
+                params![
+                    patch.id,
+                    patch.status,
+                    patch.updated_at,
+                    completed_at,
+                    snoozed_until
+                ],
+            )
+            .map_err(to_store_error)?;
+
+        if changed == 0 {
+            return Err("Reminder was not found.".to_string());
+        }
+
+        self.get_reminder_by_id(&patch.id)?
+            .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
+    }
+
+    pub fn schema_version(&self) -> Result<i64, String> {
+        self.connection
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(to_store_error)
+    }
+
     fn migrate(&self) -> Result<(), String> {
         self.connection
             .execute_batch(SCHEMA)
-            .map_err(to_store_error)
+            .map_err(to_store_error)?;
+        self.connection
+            .execute(
+                r#"
+                INSERT OR IGNORE INTO schema_migrations (version, name)
+                VALUES (?1, ?2)
+                "#,
+                params![CURRENT_SCHEMA_VERSION, "base_reminder_nodes"],
+            )
+            .map_err(to_store_error)?;
+
+        Ok(())
     }
 
     fn get_reminder_by_id(&self, id: &str) -> Result<Option<ReminderNode>, String> {
@@ -325,6 +468,36 @@ fn validate_reminder(reminder: &ReminderNode) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_status_patch(patch: &ReminderStatusPatch) -> Result<(), String> {
+    if patch.id.trim().is_empty() {
+        return Err("Reminder id is required.".to_string());
+    }
+
+    if patch.updated_at.trim().is_empty() {
+        return Err("Reminder update time is required.".to_string());
+    }
+
+    if !matches!(
+        patch.status.as_str(),
+        "pending" | "done" | "missed" | "snoozed" | "cancelled"
+    ) {
+        return Err("Reminder status is not supported.".to_string());
+    }
+
+    if patch.status == "snoozed"
+        && patch
+            .snoozed_until
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
+        return Err("Snoozed reminders require snoozedUntil.".to_string());
+    }
+
+    Ok(())
+}
+
 fn to_store_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
@@ -356,6 +529,87 @@ mod tests {
         reminder.title.clear();
 
         let result = store.create_reminder(reminder);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn records_current_schema_version() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+
+        let version = store.schema_version().expect("schema version exists");
+
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn lists_due_pending_and_due_snoozed_reminders() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("due-pending"))
+            .expect("due pending reminder is created");
+
+        let mut future = sample_reminder("future-pending");
+        future.scheduled_at = "2026-05-22T13:30:00.000Z".to_string();
+        store
+            .create_reminder(future)
+            .expect("future pending reminder is created");
+
+        let mut snoozed = sample_reminder("due-snoozed");
+        snoozed.status = "snoozed".to_string();
+        snoozed.snoozed_until = Some("2026-05-22T12:10:00.000Z".to_string());
+        store
+            .create_reminder(snoozed)
+            .expect("due snoozed reminder is created");
+
+        let due = store
+            .list_due_reminders("2026-05-22T12:31:00.000Z")
+            .expect("due reminders are listed");
+
+        assert_eq!(due.len(), 2);
+        assert_eq!(due[0].id, "due-snoozed");
+        assert_eq!(due[1].id, "due-pending");
+    }
+
+    #[test]
+    fn updates_status_and_increments_sync_version() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("reminder-1"))
+            .expect("reminder is created");
+
+        let updated = store
+            .update_reminder_status(ReminderStatusPatch {
+                id: "reminder-1".to_string(),
+                status: "done".to_string(),
+                updated_at: "2026-05-22T12:45:00.000Z".to_string(),
+                completed_at: None,
+                snoozed_until: None,
+            })
+            .expect("reminder status is updated");
+
+        assert_eq!(updated.status, "done");
+        assert_eq!(
+            updated.completed_at,
+            Some("2026-05-22T12:45:00.000Z".to_string())
+        );
+        assert_eq!(updated.sync_version, 1);
+    }
+
+    #[test]
+    fn rejects_snoozed_status_without_snooze_time() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("reminder-1"))
+            .expect("reminder is created");
+
+        let result = store.update_reminder_status(ReminderStatusPatch {
+            id: "reminder-1".to_string(),
+            status: "snoozed".to_string(),
+            updated_at: "2026-05-22T12:45:00.000Z".to_string(),
+            completed_at: None,
+            snoozed_until: None,
+        });
 
         assert!(result.is_err());
     }
