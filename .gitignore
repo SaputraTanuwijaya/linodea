@@ -1,7 +1,3 @@
-# Planning and local Codex workspace
-docs/
-.codex/
-
 # Dependencies
 node_modules/
 
