@@ -31,11 +31,15 @@ fn hide_main_window_on_close(app: &AppHandle) -> tauri::Result<()> {
     let window = main_window(app)?;
     let window_to_hide = window.clone();
 
-    window.on_window_event(move |event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let _ = window_to_hide.hide();
         }
+        WindowEvent::Focused(false) => {
+            let _ = window_to_hide.hide();
+        }
+        _ => {}
     });
 
     Ok(())

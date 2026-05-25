@@ -1,10 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { parseReminder } from "@linodea/parser";
-import type {
-  ReminderNode,
-  ReminderParseResult,
-  ReminderStatus,
-} from "@linodea/types";
+import type { ReminderNode, ReminderParseResult } from "@linodea/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
@@ -12,48 +8,27 @@ import "./App.css";
 import {
   DUE_NOTIFICATION_POLL_INTERVAL_MS,
   enableReminderNotifications,
-  getNotificationPermissionState,
   notifyDueReminders,
-  type NotificationPermissionState,
 } from "./notifications";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 
-interface ReminderStatusPatch {
-  id: string;
-  status: ReminderStatus;
-  updatedAt: string;
-  completedAt?: string;
-  snoozedUntil?: string;
-}
-
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState("");
-  const [reminders, setReminders] = useState<ReminderNode[]>([]);
-  const [dueReminderCount, setDueReminderCount] = useState(0);
-  const [statusMessage, setStatusMessage] = useState("Local storage is idle.");
   const [isSaving, setIsSaving] = useState(false);
-  const [updatingReminderId, setUpdatingReminderId] = useState<string>();
-  const [notificationPermission, setNotificationPermission] =
-    useState<NotificationPermissionState>("unknown");
-  const [isEnablingNotifications, setIsEnablingNotifications] = useState(false);
 
   const parsedReminder = useMemo(
     () => (input.trim() ? parseReminder(input) : undefined),
     [input],
   );
   const canSave = Boolean(parsedReminder?.draft.scheduledAt && input.trim());
-  const visibleReminders = reminders.slice(0, 6);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
-      setStatusMessage("Run the Tauri desktop app to save reminders locally.");
       return;
     }
-
-    void refreshLocalData(setReminders, setDueReminderCount, setStatusMessage);
-    void refreshNotificationPermission(setNotificationPermission);
+    void enableReminderNotifications().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -65,24 +40,12 @@ function App() {
 
     async function checkDueReminders() {
       try {
-        const result = await notifyDueReminders();
-
-        if (!isMounted) {
-          return;
-        }
-
-        setDueReminderCount(result.dueReminders.length);
-        if (result.permissionGranted) {
-          setNotificationPermission("granted");
-        }
-
-        if (result.sentCount > 0) {
-          setStatusMessage(notificationSentMessage(result.sentCount));
-        }
-      } catch (error) {
-        if (isMounted) {
-          setStatusMessage(toDisplayError(error));
-        }
+        await notifyDueReminders();
+      } catch {
+        // Silent: popup has no status surface; failures recover on next tick.
+      }
+      if (!isMounted) {
+        return;
       }
     }
 
@@ -111,362 +74,99 @@ function App() {
     if (event.key !== "Escape") {
       return;
     }
-
     event.preventDefault();
-
-    if (input.length > 0) {
-      setInput("");
-      setStatusMessage("Capture cleared.");
-      return;
-    }
-
-    void hideMainWindow(setStatusMessage);
+    setInput("");
+    void hideMainWindow();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!parsedReminder) {
-      focusCaptureInput(inputRef.current);
-      return;
-    }
-
-    if (!parsedReminder.draft.scheduledAt) {
-      setStatusMessage("Add a reminder time before saving.");
+    if (!canSave || !parsedReminder?.draft.scheduledAt) {
       focusCaptureInput(inputRef.current);
       return;
     }
 
     if (!isTauriRuntime()) {
-      setStatusMessage("Parser preview is ready; saving needs the desktop runtime.");
-      focusCaptureInput(inputRef.current);
       return;
     }
 
     setIsSaving(true);
-    setStatusMessage("Saving reminder...");
 
     try {
       const reminder = createReminderNode(parsedReminder, getDeviceId());
       await invoke<ReminderNode>("create_reminder_node", { reminder });
+      await notifyDueReminders().catch(() => undefined);
       setInput("");
-      await refreshLocalData(
-        setReminders,
-        setDueReminderCount,
-        setStatusMessage,
-        "Reminder saved locally.",
-      );
-      await checkDueNotificationsAfterSave(
-        setDueReminderCount,
-        setNotificationPermission,
-        setStatusMessage,
-      );
-      await hideMainWindow(setStatusMessage);
-      focusCaptureInput(inputRef.current);
-    } catch (error) {
-      setStatusMessage(toDisplayError(error));
+      await hideMainWindow();
+    } catch {
+      // Silent: keep popup minimal. Future slice can flash an inline error.
     } finally {
       setIsSaving(false);
     }
   }
 
-  async function handleEnableNotifications() {
-    if (!isTauriRuntime()) {
-      setStatusMessage("Notifications need the desktop runtime.");
-      return;
-    }
-
-    setIsEnablingNotifications(true);
-    setStatusMessage("Checking notification permission...");
-
-    try {
-      const permission = await enableReminderNotifications();
-      setNotificationPermission(permission);
-
-      if (permission !== "granted") {
-        setStatusMessage("Notifications are blocked by the system.");
-        return;
-      }
-
-      const result = await notifyDueReminders();
-      setDueReminderCount(result.dueReminders.length);
-      setStatusMessage(
-        result.sentCount > 0
-          ? notificationSentMessage(result.sentCount)
-          : "Notifications are ready.",
-      );
-    } catch (error) {
-      setStatusMessage(toDisplayError(error));
-    } finally {
-      setIsEnablingNotifications(false);
-    }
-  }
-
-  async function handleMarkDone(reminder: ReminderNode) {
-    if (!isTauriRuntime()) {
-      setStatusMessage("Status updates need the desktop runtime.");
-      return;
-    }
-
-    const completedAt = new Date().toISOString();
-    const patch: ReminderStatusPatch = {
-      id: reminder.id,
-      status: "done",
-      updatedAt: completedAt,
-      completedAt,
-    };
-
-    setUpdatingReminderId(reminder.id);
-    setStatusMessage("Updating reminder...");
-
-    try {
-      await invoke<ReminderNode>("update_reminder_node_status", { patch });
-      await refreshLocalData(
-        setReminders,
-        setDueReminderCount,
-        setStatusMessage,
-        "Reminder marked done.",
-      );
-    } catch (error) {
-      setStatusMessage(toDisplayError(error));
-    } finally {
-      setUpdatingReminderId(undefined);
-    }
-  }
-
   return (
-    <main className="min-h-screen bg-zinc-100 text-zinc-950">
-      <section className="mx-auto grid min-h-screen w-full max-w-3xl content-start gap-6 px-5 py-8 sm:py-12">
-        <header className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-cyan-700">Linodea</p>
-            <h1 className="text-2xl font-semibold leading-tight">
-              Quick capture
-            </h1>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <p className="text-sm text-zinc-500">
-              {reminders.length} local / {dueReminderCount} due
-            </p>
-            {isTauriRuntime() ? (
-              <button
-                className="h-7 rounded-md border border-zinc-300 px-2 text-xs font-medium text-zinc-600 transition hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={
-                  isEnablingNotifications ||
-                  notificationPermission === "granted" ||
-                  notificationPermission === "denied"
-                }
-                onClick={() => void handleEnableNotifications()}
-                type="button"
-              >
-                {notificationButtonLabel(
-                  notificationPermission,
-                  isEnablingNotifications,
-                )}
-              </button>
-            ) : null}
-          </div>
-        </header>
+    <main className="flex h-screen w-screen items-center justify-center bg-transparent p-2">
+      <form
+        className="flex w-full items-center gap-3 rounded-2xl border border-zinc-700/60 bg-zinc-900/95 px-4 py-3 shadow-2xl backdrop-blur"
+        onSubmit={handleSubmit}
+      >
+        <img
+          alt=""
+          className="h-9 w-9 shrink-0 select-none"
+          draggable={false}
+          src="/tauri-logo.png"
+        />
 
-        <form
-          className="overflow-hidden rounded-md border border-zinc-200 bg-white shadow-sm"
-          onSubmit={handleSubmit}
-        >
-          <div className="border-b border-zinc-200 p-4">
-            <label className="sr-only" htmlFor="quick-capture-input">
-              Reminder
-            </label>
-            <input
-              autoFocus
-              className="h-14 w-full border-0 bg-white text-lg font-medium outline-none placeholder:text-zinc-400"
-              id="quick-capture-input"
-              onKeyDown={handleInputKeyDown}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="besok jam 7 pagi les privat Kevin, siapin soal aljabar"
-              ref={inputRef}
-              value={input}
-            />
-          </div>
-
-          <div className="min-h-28 px-4 py-3">
-            {parsedReminder ? (
-              <ParsePreview parseResult={parsedReminder} />
-            ) : (
-              <div className="flex min-h-20 items-center text-sm text-zinc-500">
-                Waiting for capture.
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 bg-zinc-50 px-4 py-3">
-            <p className="text-sm text-zinc-500" role="status">
-              {statusMessage}
-            </p>
-            <button
-              className="h-10 rounded-md bg-zinc-950 px-5 text-sm font-medium text-white transition enabled:hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-zinc-300"
-              disabled={!canSave || isSaving}
-              type="submit"
-            >
-              {isSaving ? "Saving" : "Save"}
-            </button>
-          </div>
-        </form>
-
-        <section className="grid gap-3">
-          <h2 className="text-sm font-semibold text-zinc-700">
-            Local reminders
-          </h2>
-          {visibleReminders.length > 0 ? (
-            <ul className="grid gap-2">
-              {visibleReminders.map((reminder) => (
-                <li
-                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 shadow-sm"
-                  key={reminder.id}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium text-zinc-950">{reminder.title}</p>
-                      <p className="text-sm text-zinc-500">
-                        {formatDateTime(reminder.scheduledAt)}
-                      </p>
-                    </div>
-                    {isActionableReminderStatus(reminder.status) ? (
-                      <button
-                        className="h-8 rounded-md border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        disabled={updatingReminderId === reminder.id}
-                        onClick={() => void handleMarkDone(reminder)}
-                        type="button"
-                      >
-                        {updatingReminderId === reminder.id ? "Saving" : "Done"}
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-                      {reminder.type}
-                    </span>
-                    <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-                      {reminder.status}
-                    </span>
-                    <p className="text-sm text-zinc-500">
-                      {reminder.rawInput}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="rounded-md border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-500">
-              No local reminders saved yet.
-            </p>
-          )}
-        </section>
-      </section>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <label className="sr-only" htmlFor="quick-capture-input">
+            Reminder
+          </label>
+          <input
+            autoFocus
+            className="w-full bg-transparent text-base font-medium text-zinc-100 outline-none placeholder:text-zinc-500"
+            id="quick-capture-input"
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleInputKeyDown}
+            placeholder="besok jam 7 pagi les privat Kevin"
+            ref={inputRef}
+            spellCheck={false}
+            value={input}
+          />
+          <p className="mt-0.5 truncate text-xs text-zinc-400">
+            {previewLine(parsedReminder, isSaving)}
+          </p>
+        </div>
+      </form>
     </main>
   );
 }
 
-function ParsePreview({ parseResult }: { parseResult: ReminderParseResult }) {
-  return (
-    <div className="grid gap-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-base font-semibold text-zinc-950">
-          {parseResult.draft.title}
-        </span>
-        <span className="rounded bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800">
-          {parseResult.draft.type}
-        </span>
-        <span className="rounded bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700">
-          {parseResult.draft.category}
-        </span>
-        <span className="rounded bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700">
-          {Math.round(parseResult.draft.confidence * 100)}%
-        </span>
-      </div>
-
-      <p className="text-zinc-600">
-        {parseResult.draft.scheduledAt
-          ? formatDateTime(parseResult.draft.scheduledAt)
-          : "No reminder time detected yet."}
-      </p>
-
-      {parseResult.draft.checklist.length > 0 ? (
-        <p className="text-zinc-600">
-          Checklist: {parseResult.draft.checklist.join(", ")}
-        </p>
-      ) : null}
-
-      {parseResult.issues.length > 0 ? (
-        <p className="text-amber-700">
-          {parseResult.issues.map((issue) => issue.message).join(" ")}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-async function refreshLocalData(
-  setReminders: (reminders: ReminderNode[]) => void,
-  setDueReminderCount: (count: number) => void,
-  setStatusMessage: (message: string) => void,
-  successMessage = "Local SQLite storage is ready.",
-) {
-  try {
-    const now = new Date().toISOString();
-    const [reminders, dueReminders] = await Promise.all([
-      invoke<ReminderNode[]>("list_reminder_nodes"),
-      invoke<ReminderNode[]>("list_due_reminder_nodes", { now }),
-    ]);
-    setReminders(reminders);
-    setDueReminderCount(dueReminders.length);
-    setStatusMessage(successMessage);
-  } catch (error) {
-    setStatusMessage(toDisplayError(error));
+function previewLine(
+  parseResult: ReminderParseResult | undefined,
+  isSaving: boolean,
+): string {
+  if (isSaving) {
+    return "Saving...";
   }
-}
-
-async function refreshNotificationPermission(
-  setNotificationPermission: (permission: NotificationPermissionState) => void,
-) {
-  try {
-    setNotificationPermission(await getNotificationPermissionState());
-  } catch {
-    setNotificationPermission("unknown");
+  if (!parseResult) {
+    return "Press Enter to save - Esc to dismiss";
   }
-}
-
-async function checkDueNotificationsAfterSave(
-  setDueReminderCount: (count: number) => void,
-  setNotificationPermission: (permission: NotificationPermissionState) => void,
-  setStatusMessage: (message: string) => void,
-) {
-  try {
-    const result = await notifyDueReminders();
-    setDueReminderCount(result.dueReminders.length);
-
-    if (result.permissionGranted) {
-      setNotificationPermission("granted");
-    }
-
-    if (result.sentCount > 0) {
-      setStatusMessage(notificationSentMessage(result.sentCount));
-    }
-  } catch (error) {
-    setStatusMessage(toDisplayError(error));
+  if (parseResult.draft.scheduledAt) {
+    return formatDateTime(parseResult.draft.scheduledAt);
   }
+  return "Add a time, e.g. \"in 30m\" or \"besok jam 7 pagi\"";
 }
 
-async function hideMainWindow(
-  setStatusMessage: (message: string) => void,
-): Promise<void> {
+async function hideMainWindow(): Promise<void> {
   if (!isTauriRuntime()) {
     return;
   }
-
   try {
     await invoke("hide_main_window");
-  } catch (error) {
-    setStatusMessage(toDisplayError(error));
+  } catch {
+    // Silent.
   }
 }
 
@@ -517,45 +217,12 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
-function isActionableReminderStatus(status: ReminderStatus): boolean {
-  return status === "pending" || status === "missed" || status === "snoozed";
-}
-
-function notificationButtonLabel(
-  permission: NotificationPermissionState,
-  isEnabling: boolean,
-): string {
-  if (isEnabling) {
-    return "Checking";
-  }
-
-  if (permission === "granted") {
-    return "Notifications on";
-  }
-
-  if (permission === "denied") {
-    return "Notifications blocked";
-  }
-
-  return "Enable notifications";
-}
-
-function notificationSentMessage(sentCount: number): string {
-  return sentCount === 1
-    ? "Sent 1 due reminder notification."
-    : `Sent ${sentCount} due reminder notifications.`;
-}
-
 function focusCaptureInput(input: HTMLInputElement | null) {
   window.requestAnimationFrame(() => input?.focus());
 }
 
 function isTauriRuntime(): boolean {
   return "__TAURI_INTERNALS__" in window;
-}
-
-function toDisplayError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export default App;
