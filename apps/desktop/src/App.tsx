@@ -9,6 +9,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 
 import "./App.css";
+import {
+  DUE_NOTIFICATION_POLL_INTERVAL_MS,
+  enableReminderNotifications,
+  getNotificationPermissionState,
+  notifyDueReminders,
+  type NotificationPermissionState,
+} from "./notifications";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 
@@ -28,6 +35,9 @@ function App() {
   const [statusMessage, setStatusMessage] = useState("Local storage is idle.");
   const [isSaving, setIsSaving] = useState(false);
   const [updatingReminderId, setUpdatingReminderId] = useState<string>();
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermissionState>("unknown");
+  const [isEnablingNotifications, setIsEnablingNotifications] = useState(false);
 
   const parsedReminder = useMemo(
     () => (input.trim() ? parseReminder(input) : undefined),
@@ -43,6 +53,49 @@ function App() {
     }
 
     void refreshLocalData(setReminders, setDueReminderCount, setStatusMessage);
+    void refreshNotificationPermission(setNotificationPermission);
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    let isMounted = true;
+
+    async function checkDueReminders() {
+      try {
+        const result = await notifyDueReminders();
+
+        if (!isMounted) {
+          return;
+        }
+
+        setDueReminderCount(result.dueReminders.length);
+        if (result.permissionGranted) {
+          setNotificationPermission("granted");
+        }
+
+        if (result.sentCount > 0) {
+          setStatusMessage(notificationSentMessage(result.sentCount));
+        }
+      } catch (error) {
+        if (isMounted) {
+          setStatusMessage(toDisplayError(error));
+        }
+      }
+    }
+
+    void checkDueReminders();
+    const intervalId = window.setInterval(
+      () => void checkDueReminders(),
+      DUE_NOTIFICATION_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -103,12 +156,49 @@ function App() {
         setStatusMessage,
         "Reminder saved locally.",
       );
+      await checkDueNotificationsAfterSave(
+        setDueReminderCount,
+        setNotificationPermission,
+        setStatusMessage,
+      );
       await hideMainWindow(setStatusMessage);
       focusCaptureInput(inputRef.current);
     } catch (error) {
       setStatusMessage(toDisplayError(error));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleEnableNotifications() {
+    if (!isTauriRuntime()) {
+      setStatusMessage("Notifications need the desktop runtime.");
+      return;
+    }
+
+    setIsEnablingNotifications(true);
+    setStatusMessage("Checking notification permission...");
+
+    try {
+      const permission = await enableReminderNotifications();
+      setNotificationPermission(permission);
+
+      if (permission !== "granted") {
+        setStatusMessage("Notifications are blocked by the system.");
+        return;
+      }
+
+      const result = await notifyDueReminders();
+      setDueReminderCount(result.dueReminders.length);
+      setStatusMessage(
+        result.sentCount > 0
+          ? notificationSentMessage(result.sentCount)
+          : "Notifications are ready.",
+      );
+    } catch (error) {
+      setStatusMessage(toDisplayError(error));
+    } finally {
+      setIsEnablingNotifications(false);
     }
   }
 
@@ -154,9 +244,28 @@ function App() {
               Quick capture
             </h1>
           </div>
-          <p className="text-sm text-zinc-500">
-            {reminders.length} local / {dueReminderCount} due
-          </p>
+          <div className="flex flex-col items-end gap-1">
+            <p className="text-sm text-zinc-500">
+              {reminders.length} local / {dueReminderCount} due
+            </p>
+            {isTauriRuntime() ? (
+              <button
+                className="h-7 rounded-md border border-zinc-300 px-2 text-xs font-medium text-zinc-600 transition hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={
+                  isEnablingNotifications ||
+                  notificationPermission === "granted" ||
+                  notificationPermission === "denied"
+                }
+                onClick={() => void handleEnableNotifications()}
+                type="button"
+              >
+                {notificationButtonLabel(
+                  notificationPermission,
+                  isEnablingNotifications,
+                )}
+              </button>
+            ) : null}
+          </div>
         </header>
 
         <form
@@ -316,6 +425,37 @@ async function refreshLocalData(
   }
 }
 
+async function refreshNotificationPermission(
+  setNotificationPermission: (permission: NotificationPermissionState) => void,
+) {
+  try {
+    setNotificationPermission(await getNotificationPermissionState());
+  } catch {
+    setNotificationPermission("unknown");
+  }
+}
+
+async function checkDueNotificationsAfterSave(
+  setDueReminderCount: (count: number) => void,
+  setNotificationPermission: (permission: NotificationPermissionState) => void,
+  setStatusMessage: (message: string) => void,
+) {
+  try {
+    const result = await notifyDueReminders();
+    setDueReminderCount(result.dueReminders.length);
+
+    if (result.permissionGranted) {
+      setNotificationPermission("granted");
+    }
+
+    if (result.sentCount > 0) {
+      setStatusMessage(notificationSentMessage(result.sentCount));
+    }
+  } catch (error) {
+    setStatusMessage(toDisplayError(error));
+  }
+}
+
 async function hideMainWindow(
   setStatusMessage: (message: string) => void,
 ): Promise<void> {
@@ -379,6 +519,31 @@ function formatDateTime(value: string): string {
 
 function isActionableReminderStatus(status: ReminderStatus): boolean {
   return status === "pending" || status === "missed" || status === "snoozed";
+}
+
+function notificationButtonLabel(
+  permission: NotificationPermissionState,
+  isEnabling: boolean,
+): string {
+  if (isEnabling) {
+    return "Checking";
+  }
+
+  if (permission === "granted") {
+    return "Notifications on";
+  }
+
+  if (permission === "denied") {
+    return "Notifications blocked";
+  }
+
+  return "Enable notifications";
+}
+
+function notificationSentMessage(sentCount: number): string {
+  return sentCount === 1
+    ? "Sent 1 due reminder notification."
+    : `Sent ${sentCount} due reminder notifications.`;
 }
 
 function focusCaptureInput(input: HTMLInputElement | null) {

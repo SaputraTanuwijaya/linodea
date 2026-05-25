@@ -3,7 +3,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 use crate::desktop;
 
-const CAPTURE_SHORTCUT_NAME: &str = "Ctrl+Alt+Space";
+const CAPTURE_SHORTCUT_NAME: &str = "Ctrl+Alt+Shift+Space";
 
 pub fn setup_global_shortcut(app: &mut App) -> tauri::Result<()> {
     let capture_shortcut = capture_shortcut_definition();
@@ -32,5 +32,8 @@ pub fn setup_global_shortcut(app: &mut App) -> tauri::Result<()> {
 }
 
 fn capture_shortcut_definition() -> Shortcut {
-    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space)
+    Shortcut::new(
+        Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT),
+        Code::Space,
+    )
 }

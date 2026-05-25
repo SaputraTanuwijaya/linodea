@@ -6,8 +6,10 @@ Status: early MVP skeleton. The repository currently includes the desktop shell,
 quick capture shell v0, shared types, deterministic parser v0, and a first local
 SQLite data layer with status and due-reminder queries. It also has a first
 Tauri desktop integration slice: tray icon, close-to-tray, and native window
-show/hide commands. Global shortcut v0 registers `Ctrl+Alt+Space` to show and
-focus the capture window.
+show/hide commands. Global shortcut v0 registers `Ctrl+Alt+Shift+Space` to show and
+focus the capture window. Local notifications v0 can request notification
+permission, poll due reminders, and send one deduped desktop notification per
+due reminder while the app is running.
 
 ## Category
 
@@ -33,7 +35,7 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 
 ## Planned MVP Features
 
-- Global shortcut capture (`Ctrl+Alt+Space`).
+- Global shortcut capture (`Ctrl+Alt+Shift+Space`).
 - Quick capture window.
 - Deterministic reminder parser.
 - Raw input preservation.
