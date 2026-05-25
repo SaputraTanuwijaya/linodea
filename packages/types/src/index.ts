@@ -118,11 +118,21 @@ export type ParserIssueCode =
   | "ambiguous_time"
   | "ambiguous_date"
   | "unsupported_phrase"
-  | "low_confidence";
+  | "low_confidence"
+  | "autocorrect"
+  | "ambiguous_token";
 
 export interface ParserIssue {
   code: ParserIssueCode;
   message: string;
+  /** Original token as typed by the user. Set for `autocorrect` and `ambiguous_token`. */
+  original?: string;
+  /** Canonical vocabulary word the parser matched. Set for `autocorrect`. */
+  corrected?: string;
+  /** Edit distance between original and corrected. Set for `autocorrect`. */
+  distance?: number;
+  /** Candidate corrections when ambiguous. Set for `ambiguous_token`. */
+  candidates?: string[];
 }
 
 export interface ReminderParseResult {

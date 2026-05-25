@@ -7,6 +7,16 @@ import type {
   ReminderParseResult,
   ReminderType,
 } from "@linodea/types";
+import {
+  CHECKLIST_CUES,
+  DATE_WORDS,
+  TYPE_COOLDOWN_WORDS,
+  TYPE_DEADLINE_WORDS,
+  TYPE_FOLLOWUP_WORDS,
+  TYPE_PREP_WORDS,
+  wordsOf,
+} from "./vocabularies.js";
+import { findFuzzyTokenMatch } from "./fuzzy.js";
 
 export interface ParseReminderOptions {
   now?: Date | string;
@@ -68,7 +78,7 @@ export function parseReminderWithNow(
   const now = coerceDate(options.now);
   const parsedAt = now.toISOString();
   const dateTime = parseDateTime(normalizedInput, now, options.timezone);
-  const type = detectReminderType(normalizedInput);
+  const typeFinding = detectReminderType(normalizedInput);
   const typeSegments = findTypeSegments(normalizedInput);
   const textWithoutMeta = removeSegments(normalizedInput, [
     ...dateTime.segments,
@@ -76,12 +86,21 @@ export function parseReminderWithNow(
   ]);
   const checklistParse = extractChecklist(textWithoutMeta);
   const title = cleanTitle(checklistParse.titleSource);
-  const issues = [...dateTime.issues];
+
+  const issues: ParserIssue[] = [...dateTime.issues];
+  if (typeFinding.issue) issues.push(typeFinding.issue);
+  if (checklistParse.issue) issues.push(checklistParse.issue);
+
+  // Autocorrects shouldn't tank confidence as hard as real parse failures.
+  // Count them separately at 0.5x weight in the confidence score.
+  const autocorrectCount = issues.filter((i) => i.code === "autocorrect").length;
+  const hardIssueCount = issues.length - autocorrectCount;
+
   const confidence = scoreConfidence({
     hasTitle: title.length > 0,
     hasScheduledAt: dateTime.hasScheduledAt,
     hasChecklist: checklistParse.checklist.length > 0,
-    issueCount: issues.length,
+    issueCount: hardIssueCount + autocorrectCount * 0.5,
   });
 
   if (confidence < 0.65) {
@@ -95,7 +114,7 @@ export function parseReminderWithNow(
     title: title || "Reminder",
     scheduledAt: dateTime.scheduledAt,
     timezone: options.timezone,
-    type,
+    type: typeFinding.type,
     category: detectReminderCategory(normalizedInput),
     checklist: checklistParse.checklist,
     confidence,
@@ -127,15 +146,17 @@ function parseDateTime(
     };
   }
 
-  const date = findDateOffset(input);
-  const time = findClockTime(input, date !== undefined);
+  const dateFinding = findDateOffset(input);
+  const dateMatch = dateFinding?.match;
+  const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
+  const time = findClockTime(input, dateMatch !== undefined);
   const segments = [
-    ...(date ? [date.segment] : []),
+    ...(dateMatch ? [dateMatch.segment] : []),
     ...(time ? [time.segment] : []),
   ];
 
-  if (date && time) {
-    const baseDate = addDaysInTimezone(now, timezone, date.dayOffset);
+  if (dateMatch && time) {
+    const baseDate = addDaysInTimezone(now, timezone, dateMatch.dayOffset);
     return {
       scheduledAt: localDateTimeToUtcIso(
         {
@@ -149,7 +170,7 @@ function parseDateTime(
         timezone,
       ),
       segments,
-      issues: [],
+      issues: dateIssues,
       hasScheduledAt: true,
       hasDate: true,
       hasTime: true,
@@ -162,6 +183,7 @@ function parseDateTime(
       scheduledAt,
       segments,
       issues: [
+        ...dateIssues,
         {
           code: "ambiguous_date",
           message: "No date was found; scheduled the next matching clock time.",
@@ -173,10 +195,11 @@ function parseDateTime(
     };
   }
 
-  if (date) {
+  if (dateMatch) {
     return {
       segments,
       issues: [
+        ...dateIssues,
         {
           code: "missing_time",
           message: "A date was found, but no clock time was found.",
@@ -191,6 +214,7 @@ function parseDateTime(
   return {
     segments,
     issues: [
+      ...dateIssues,
       {
         code: "missing_time",
         message: "No reminder time was found.",
@@ -225,9 +249,18 @@ function findRelativeTime(input: string):
   return undefined;
 }
 
-function findDateOffset(input: string):
-  | { dayOffset: number; segment: TextSegment }
-  | undefined {
+/**
+ * Result shape for the fuzzy-aware finders: optional `match` for the schedulable
+ * data, optional `issue` for autocorrect/ambiguous notes. `undefined` overall
+ * means nothing was found at all (clean miss, no signal).
+ */
+interface DateOffsetFinding {
+  match?: { dayOffset: number; segment: TextSegment };
+  issue?: ParserIssue;
+}
+
+function findDateOffset(input: string): DateOffsetFinding | undefined {
+  // Exact match first — keeps behavior identical for clean input.
   const patterns: Array<{ pattern: RegExp; dayOffset: number }> = [
     { pattern: /\b(today|hari ini)\b/i, dayOffset: 0 },
     { pattern: /\b(tomorrow|besok)\b/i, dayOffset: 1 },
@@ -241,12 +274,69 @@ function findDateOffset(input: string):
     }
 
     return {
-      dayOffset,
-      segment: { start: match.index, end: match.index + match[0].length },
+      match: {
+        dayOffset,
+        segment: { start: match.index, end: match.index + match[0].length },
+      },
     };
   }
 
-  return undefined;
+  // Fuzzy fallback — catches typos like `besko`, `tomrorow`, `hri ini`.
+  const fuzzy = findFuzzyTokenMatch(input, wordsOf(DATE_WORDS));
+  if (!fuzzy) return undefined;
+
+  if ("ambiguous" in fuzzy) {
+    // Surface the ambiguity but don't pick a winner. The token stays in the
+    // input (no segment removal) and no scheduling happens off it.
+    return {
+      issue: makeAmbiguousIssue(fuzzy.original, fuzzy.ambiguous.candidates, "date word"),
+    };
+  }
+
+  const entry = DATE_WORDS.find((e) => e.word === fuzzy.result.matched);
+  if (!entry) return undefined;
+
+  return {
+    match: {
+      dayOffset: entry.dayOffset,
+      segment: { start: fuzzy.start, end: fuzzy.end },
+    },
+    issue: makeAutocorrectIssue(
+      fuzzy.original,
+      fuzzy.result.matched,
+      fuzzy.result.distance,
+      "date word",
+    ),
+  };
+}
+
+function makeAutocorrectIssue(
+  original: string,
+  corrected: string,
+  distance: number,
+  kind: string,
+): ParserIssue {
+  return {
+    code: "autocorrect",
+    message: `Interpreted "${original}" as "${corrected}" (${kind} typo, distance ${distance}).`,
+    original,
+    corrected,
+    distance,
+  };
+}
+
+function makeAmbiguousIssue(
+  original: string,
+  candidates: string[],
+  kind: string,
+): ParserIssue {
+  const list = candidates.map((c) => `"${c}"`).join(" or ");
+  return {
+    code: "ambiguous_token",
+    message: `"${original}" could be ${list} (${kind}); not autocorrected.`,
+    original,
+    candidates,
+  };
 }
 
 function findClockTime(
@@ -296,26 +386,63 @@ function findClockTime(
   };
 }
 
-function detectReminderType(input: string): ReminderType {
+interface TypeFinding {
+  type: ReminderType;
+  issue?: ParserIssue;
+}
+
+function detectReminderType(input: string): TypeFinding {
   const lower = input.toLowerCase();
 
-  if (/\bh-\d+\b/.test(lower) || /\b(before|sebelum)\b/.test(lower)) {
-    return "prep";
+  // H-N is a syntactic marker, not a word — no fuzzy needed.
+  if (/\bh-\d+\b/.test(lower)) {
+    return { type: "prep" };
   }
 
-  if (/\b(t\+\d+|follow[- ]?up|follow up|tindak lanjut)\b/.test(lower)) {
-    return "followup";
+  // Exact-match against each type vocabulary first; fuzzy fallback if all miss.
+  const exactPrep = /\b(before|sebelum)\b/.test(lower);
+  if (exactPrep) return { type: "prep" };
+
+  const exactFollowup = /\b(t\+\d+|follow[- ]?up|follow up|tindak lanjut)\b/.test(lower);
+  if (exactFollowup) return { type: "followup" };
+
+  const exactDeadline = /\b(deadline|due|batas akhir)\b/.test(lower);
+  if (exactDeadline) return { type: "deadline" };
+
+  const exactCooldown = /\b(cooldown|cool down|cool-off|cool off)\b/.test(lower);
+  if (exactCooldown) return { type: "cooldown" };
+
+  // Fuzzy fallback. Try each vocabulary in priority order (prep first, since
+  // it's the most user-visible signal — "before/sebelum" with typos).
+  const groups: Array<{ vocab: typeof TYPE_PREP_WORDS; type: ReminderType; kind: string }> = [
+    { vocab: TYPE_PREP_WORDS, type: "prep", kind: "prep cue" },
+    { vocab: TYPE_FOLLOWUP_WORDS, type: "followup", kind: "follow-up cue" },
+    { vocab: TYPE_DEADLINE_WORDS, type: "deadline", kind: "deadline cue" },
+    { vocab: TYPE_COOLDOWN_WORDS, type: "cooldown", kind: "cooldown cue" },
+  ];
+
+  for (const { vocab, type, kind } of groups) {
+    const fuzzy = findFuzzyTokenMatch(input, wordsOf(vocab));
+    if (!fuzzy) continue;
+    if ("ambiguous" in fuzzy) {
+      // Ambiguity across one vocabulary is rare; surface but don't classify off it.
+      return {
+        type: "main",
+        issue: makeAmbiguousIssue(fuzzy.original, fuzzy.ambiguous.candidates, kind),
+      };
+    }
+    return {
+      type,
+      issue: makeAutocorrectIssue(
+        fuzzy.original,
+        fuzzy.result.matched,
+        fuzzy.result.distance,
+        kind,
+      ),
+    };
   }
 
-  if (/\b(deadline|due|batas akhir)\b/.test(lower)) {
-    return "deadline";
-  }
-
-  if (/\b(cooldown|cool down|cool-off|cool off)\b/.test(lower)) {
-    return "cooldown";
-  }
-
-  return "main";
+  return { type: "main" };
 }
 
 function findTypeSegments(input: string): TextSegment[] {
@@ -329,21 +456,53 @@ function findTypeSegments(input: string): TextSegment[] {
   return segments;
 }
 
-function extractChecklist(input: string): ChecklistParse {
+interface ChecklistResult extends ChecklistParse {
+  issue?: ParserIssue;
+}
+
+function extractChecklist(input: string): ChecklistResult {
+  // Exact-match first.
   const match =
     /\b(bring|bawa|prepare|siapin|open|buka)\b\s+(.+)$/i.exec(input);
 
-  if (!match || match.index === undefined) {
-    return { titleSource: input, checklist: [] };
+  if (match && match.index !== undefined) {
+    const cue = match[1].toLowerCase();
+    const rawItems = stripTimingTail(match[2]);
+    const checklist = splitChecklistItems(rawItems, cue);
+    return {
+      titleSource: input.slice(0, match.index),
+      checklist,
+    };
   }
 
-  const cue = match[1].toLowerCase();
-  const rawItems = stripTimingTail(match[2]);
-  const checklist = splitChecklistItems(rawItems, cue);
+  // Fuzzy fallback — catches typos like `brnig laptop`, `bwa laptop`, `prperae slides`.
+  const fuzzy = findFuzzyTokenMatch(input, wordsOf(CHECKLIST_CUES));
+  if (!fuzzy) return { titleSource: input, checklist: [] };
+
+  if ("ambiguous" in fuzzy) {
+    // Don't split into a checklist if we can't tell which cue word was meant.
+    // The whole text falls into title; surface the ambiguity.
+    return {
+      titleSource: input,
+      checklist: [],
+      issue: makeAmbiguousIssue(fuzzy.original, fuzzy.ambiguous.candidates, "checklist cue"),
+    };
+  }
+
+  const cueWord = fuzzy.result.matched.toLowerCase();
+  const tail = input.slice(fuzzy.end);
+  const rawItems = stripTimingTail(tail.trim());
+  const checklist = splitChecklistItems(rawItems, cueWord);
 
   return {
-    titleSource: input.slice(0, match.index),
+    titleSource: input.slice(0, fuzzy.start),
     checklist,
+    issue: makeAutocorrectIssue(
+      fuzzy.original,
+      fuzzy.result.matched,
+      fuzzy.result.distance,
+      "checklist cue",
+    ),
   };
 }
 
@@ -428,6 +587,11 @@ function scoreConfidence(input: {
   hasTitle: boolean;
   hasScheduledAt: boolean;
   hasChecklist: boolean;
+  /**
+   * Weighted issue count. Hard issues (missing_time, ambiguous_date, etc.)
+   * count as 1.0; soft issues (autocorrect) count as 0.5. The caller does
+   * the weighting and passes the sum.
+   */
   issueCount: number;
 }): number {
   let score = 0.5;
