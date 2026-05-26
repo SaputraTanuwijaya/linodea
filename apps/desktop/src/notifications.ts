@@ -7,6 +7,7 @@ import {
 import type { ReminderNode, ReminderStatus } from "@linodea/types";
 
 import { getStoredPrealerts, sortDescending } from "./prealerts";
+import { getStoredLanguage, stringsFor } from "./i18n";
 
 export const DUE_NOTIFICATION_POLL_INTERVAL_MS = 15_000;
 
@@ -69,6 +70,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const reminders = await invoke<ReminderNode[]>("list_reminder_nodes");
   const actionable = reminders.filter(isActionable);
   const sortedOffsets = sortDescending(getStoredPrealerts().offsets);
+  const strings = stringsFor(getStoredLanguage());
   const store = readFireStore();
   const now = Date.now();
   let sentCount = 0;
@@ -93,8 +95,8 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
       if (record.prealerts?.includes(offset.minutes)) continue;
 
       sendNotification({
-        title: "Linodea reminder",
-        body: prealertBody(reminder, offset.minutes),
+        title: "Linodea",
+        body: strings.notificationBody.prealert(reminder.title, offset.minutes),
       });
       record.prealerts = [...(record.prealerts ?? []), offset.minutes];
       sentCount += 1;
@@ -103,8 +105,8 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     // T-due + auto-done ----------------------------------------------
     if (dueMs <= now && !record.due) {
       sendNotification({
-        title: "Linodea reminder",
-        body: dueBody(reminder),
+        title: "Linodea",
+        body: strings.notificationBody.due(reminder.title, formatScheduledTime(reminder)),
       });
       record.due = true;
       sentCount += 1;
@@ -145,28 +147,11 @@ function isActionable(reminder: ReminderNode): boolean {
   );
 }
 
-function dueBody(reminder: ReminderNode): string {
-  const time = new Intl.DateTimeFormat(undefined, {
+function formatScheduledTime(reminder: ReminderNode): string {
+  return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(reminder.scheduledAt));
-  return `${reminder.title} - ${time}`;
-}
-
-function prealertBody(reminder: ReminderNode, offsetMinutes: number): string {
-  return `In ${formatLead(offsetMinutes)}: ${reminder.title}`;
-}
-
-function formatLead(minutes: number): string {
-  if (minutes % (24 * 60) === 0 && minutes >= 24 * 60) {
-    const days = minutes / (24 * 60);
-    return days === 1 ? "1 day" : `${days} days`;
-  }
-  if (minutes % 60 === 0 && minutes >= 60) {
-    const hours = minutes / 60;
-    return hours === 1 ? "1 hour" : `${hours} hours`;
-  }
-  return minutes === 1 ? "1 min" : `${minutes} min`;
 }
 
 function readFireStore(): FireStore {

@@ -13,7 +13,7 @@ const TRAY_MENU_QUIT: &str = "quit_app";
 
 const CAPTURE_SIZE: (f64, f64) = (620.0, 130.0);
 const LIST_SIZE: (f64, f64) = (620.0, 420.0);
-const SETTINGS_SIZE: (f64, f64) = (620.0, 480.0);
+const SETTINGS_SIZE: (f64, f64) = (620.0, 580.0);
 
 const MODE_EVENT: &str = "linodea:mode";
 const MODE_CAPTURE: &str = "capture";

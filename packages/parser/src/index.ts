@@ -15,12 +15,50 @@ import {
   TYPE_FOLLOWUP_WORDS,
   TYPE_PREP_WORDS,
   wordsOf,
+  type LangTag,
+  type VocabularyEntry,
 } from "./vocabularies.js";
 import { findFuzzyTokenMatch } from "./fuzzy.js";
+
+export type { LangTag, VocabularyEntry } from "./vocabularies.js";
+
+/**
+ * Optional language hint for the parser. When set to "en" or "id", an
+ * otherwise-ambiguous fuzzy match (e.g., a typo that fits both an English
+ * and an Indonesian vocabulary entry at the same edit distance) resolves
+ * toward the preferred language if exactly one candidate matches. "auto"
+ * (the default) preserves the historical behavior: ties stay ambiguous.
+ *
+ * Important: this is a TIE-BREAKER, not a mode switch. Linodea remains
+ * bilingual-first — preferred-language inputs still parse fully regardless
+ * of the user's preference (e.g., `tomorrow jam 8` works in either mode).
+ */
+export type PreferredLanguage = LangTag | "auto";
 
 export interface ParseReminderOptions {
   now?: Date | string;
   timezone?: IanaTimezone;
+  preferredLanguage?: PreferredLanguage;
+}
+
+/**
+ * Resolve a fuzzy-ambiguous result toward a preferred language. Returns the
+ * single matching vocabulary entry if exactly one candidate has the
+ * preferred language tag, otherwise null (leave the ambiguity surfaced).
+ */
+export function resolveByLanguage<T extends VocabularyEntry>(
+  candidates: readonly string[],
+  vocabulary: readonly T[],
+  preferredLanguage: PreferredLanguage | undefined,
+): T | null {
+  if (!preferredLanguage || preferredLanguage === "auto") return null;
+  const matching = candidates
+    .map((word) => vocabulary.find((entry) => entry.word === word))
+    .filter(
+      (entry): entry is T =>
+        entry !== undefined && entry.lang === preferredLanguage,
+    );
+  return matching.length === 1 ? matching[0] : null;
 }
 
 interface TextSegment {
@@ -67,6 +105,7 @@ export function parseReminder(
   return parseReminderWithNow(rawInput, {
     now: options.now ?? new Date(),
     timezone: options.timezone ?? getLocalTimezone(),
+    preferredLanguage: options.preferredLanguage ?? "auto",
   });
 }
 
@@ -77,14 +116,19 @@ export function parseReminderWithNow(
   const normalizedInput = normalizeReminderInput(rawInput);
   const now = coerceDate(options.now);
   const parsedAt = now.toISOString();
-  const dateTime = parseDateTime(normalizedInput, now, options.timezone);
-  const typeFinding = detectReminderType(normalizedInput);
+  const dateTime = parseDateTime(
+    normalizedInput,
+    now,
+    options.timezone,
+    options.preferredLanguage,
+  );
+  const typeFinding = detectReminderType(normalizedInput, options.preferredLanguage);
   const typeSegments = findTypeSegments(normalizedInput);
   const textWithoutMeta = removeSegments(normalizedInput, [
     ...dateTime.segments,
     ...typeSegments,
   ]);
-  const checklistParse = extractChecklist(textWithoutMeta);
+  const checklistParse = extractChecklist(textWithoutMeta, options.preferredLanguage);
   const title = cleanTitle(checklistParse.titleSource);
 
   const issues: ParserIssue[] = [...dateTime.issues];
@@ -133,6 +177,7 @@ function parseDateTime(
   input: string,
   now: Date,
   timezone: IanaTimezone,
+  preferredLanguage: PreferredLanguage,
 ): DateTimeParse {
   const relative = findRelativeTime(input);
   if (relative) {
@@ -146,7 +191,7 @@ function parseDateTime(
     };
   }
 
-  const dateFinding = findDateOffset(input);
+  const dateFinding = findDateOffset(input, preferredLanguage);
   const dateMatch = dateFinding?.match;
   const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
   const time = findClockTime(input, dateMatch !== undefined);
@@ -259,7 +304,10 @@ interface DateOffsetFinding {
   issue?: ParserIssue;
 }
 
-function findDateOffset(input: string): DateOffsetFinding | undefined {
+function findDateOffset(
+  input: string,
+  preferredLanguage: PreferredLanguage,
+): DateOffsetFinding | undefined {
   // Exact match first — keeps behavior identical for clean input.
   const patterns: Array<{ pattern: RegExp; dayOffset: number }> = [
     { pattern: /\b(today|hari ini)\b/i, dayOffset: 0 },
@@ -286,6 +334,26 @@ function findDateOffset(input: string): DateOffsetFinding | undefined {
   if (!fuzzy) return undefined;
 
   if ("ambiguous" in fuzzy) {
+    // Try language bias before surfacing ambiguity.
+    const biased = resolveByLanguage(
+      fuzzy.ambiguous.candidates,
+      DATE_WORDS,
+      preferredLanguage,
+    );
+    if (biased) {
+      return {
+        match: {
+          dayOffset: biased.dayOffset,
+          segment: { start: fuzzy.start, end: fuzzy.end },
+        },
+        issue: makeAutocorrectIssue(
+          fuzzy.original,
+          biased.word,
+          fuzzy.ambiguous.distance,
+          "date word",
+        ),
+      };
+    }
     // Surface the ambiguity but don't pick a winner. The token stays in the
     // input (no segment removal) and no scheduling happens off it.
     return {
@@ -391,7 +459,10 @@ interface TypeFinding {
   issue?: ParserIssue;
 }
 
-function detectReminderType(input: string): TypeFinding {
+function detectReminderType(
+  input: string,
+  preferredLanguage: PreferredLanguage,
+): TypeFinding {
   const lower = input.toLowerCase();
 
   // H-N is a syntactic marker, not a word — no fuzzy needed.
@@ -425,6 +496,22 @@ function detectReminderType(input: string): TypeFinding {
     const fuzzy = findFuzzyTokenMatch(input, wordsOf(vocab));
     if (!fuzzy) continue;
     if ("ambiguous" in fuzzy) {
+      const biased = resolveByLanguage(
+        fuzzy.ambiguous.candidates,
+        vocab,
+        preferredLanguage,
+      );
+      if (biased) {
+        return {
+          type,
+          issue: makeAutocorrectIssue(
+            fuzzy.original,
+            biased.word,
+            fuzzy.ambiguous.distance,
+            kind,
+          ),
+        };
+      }
       // Ambiguity across one vocabulary is rare; surface but don't classify off it.
       return {
         type: "main",
@@ -460,7 +547,10 @@ interface ChecklistResult extends ChecklistParse {
   issue?: ParserIssue;
 }
 
-function extractChecklist(input: string): ChecklistResult {
+function extractChecklist(
+  input: string,
+  preferredLanguage: PreferredLanguage,
+): ChecklistResult {
   // Exact-match first.
   const match =
     /\b(bring|bawa|prepare|siapin|open|buka)\b\s+(.+)$/i.exec(input);
@@ -480,6 +570,27 @@ function extractChecklist(input: string): ChecklistResult {
   if (!fuzzy) return { titleSource: input, checklist: [] };
 
   if ("ambiguous" in fuzzy) {
+    const biased = resolveByLanguage(
+      fuzzy.ambiguous.candidates,
+      CHECKLIST_CUES,
+      preferredLanguage,
+    );
+    if (biased) {
+      const cueWord = biased.word.toLowerCase();
+      const tail = input.slice(fuzzy.end);
+      const rawItems = stripTimingTail(tail.trim());
+      const checklist = splitChecklistItems(rawItems, cueWord);
+      return {
+        titleSource: input.slice(0, fuzzy.start),
+        checklist,
+        issue: makeAutocorrectIssue(
+          fuzzy.original,
+          biased.word,
+          fuzzy.ambiguous.distance,
+          "checklist cue",
+        ),
+      };
+    }
     // Don't split into a checklist if we can't tell which cue word was meant.
     // The whole text falls into title; surface the ambiguity.
     return {

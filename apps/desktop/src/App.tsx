@@ -29,7 +29,6 @@ import {
 } from "./themes";
 import {
   bestUnit,
-  describeOffset,
   getStoredPrealerts,
   hasDuplicate,
   MAX_PREALERTS,
@@ -42,13 +41,23 @@ import {
   type PrealertConfig,
   type PrealertOffset,
 } from "./prealerts";
+import {
+  applyLanguage,
+  getStoredLanguage,
+  LANGUAGES,
+  persistLanguage,
+  stringsFor,
+  type LanguageDefinition,
+  type LanguageId,
+  type Strings,
+} from "./i18n";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 const MODE_EVENT = "linodea:mode";
 
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 const MENU_WIDTH = 200;
-const MENU_HEIGHT = 196;
+const MENU_HEIGHT = 220;
 
 type Mode = "capture" | "list" | "settings";
 
@@ -79,10 +88,18 @@ function App() {
   const [prealertConfig, setPrealertConfig] = useState<PrealertConfig>(() =>
     getStoredPrealerts(),
   );
+  const [language, setLanguageState] = useState<LanguageId>(() =>
+    getStoredLanguage(),
+  );
+
+  const strings = useMemo(() => stringsFor(language), [language]);
 
   const parsedReminder = useMemo(
-    () => (input.trim() ? parseReminder(input) : undefined),
-    [input],
+    () =>
+      input.trim()
+        ? parseReminder(input, { preferredLanguage: language })
+        : undefined,
+    [input, language],
   );
   const canSave = Boolean(parsedReminder?.draft.scheduledAt && input.trim());
 
@@ -95,6 +112,12 @@ function App() {
   const handlePrealertsChange = useCallback((next: PrealertConfig) => {
     persistPrealerts(next);
     setPrealertConfig(next);
+  }, []);
+
+  const handleLanguageChange = useCallback((next: LanguageId) => {
+    applyLanguage(next);
+    persistLanguage(next);
+    setLanguageState(next);
   }, []);
 
   const refreshList = useCallback(async () => {
@@ -347,7 +370,7 @@ function App() {
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <label className="sr-only" htmlFor="quick-capture-input">
-              Reminder
+              {strings.menu.capture}
             </label>
             <input
               autoFocus
@@ -355,13 +378,13 @@ function App() {
               id="quick-capture-input"
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="besok jam 7 pagi les privat Kevin"
+              placeholder={strings.placeholder}
               ref={inputRef}
               spellCheck={false}
               value={input}
             />
             <p className="truncate text-xs leading-tight text-[var(--lin-text-dim)]">
-              {previewLine(parsedReminder, isSaving)}
+              {previewLine(parsedReminder, isSaving, strings)}
             </p>
           </div>
           <button
@@ -380,16 +403,20 @@ function App() {
             isLoading={isLoadingList}
             onMarkDone={handleMarkDone}
             reminders={reminders}
+            strings={strings}
             updatingReminderId={updatingReminderId}
           />
         ) : null}
 
         {mode === "settings" ? (
           <SettingsPanel
+            activeLanguage={language}
             activeTheme={theme}
+            onLanguageChange={handleLanguageChange}
             onPrealertsChange={handlePrealertsChange}
             onThemeChange={handleThemeChange}
             prealertConfig={prealertConfig}
+            strings={strings}
           />
         ) : null}
       </div>
@@ -400,6 +427,7 @@ function App() {
           menuRef={menuRef}
           mode={mode}
           onAction={handleMenuAction}
+          strings={strings}
         />
       ) : null}
     </main>
@@ -413,11 +441,13 @@ function PopupMenu({
   menuRef,
   mode,
   onAction,
+  strings,
 }: {
   anchor: MenuAnchor;
   menuRef: React.RefObject<HTMLDivElement | null>;
   mode: Mode;
   onAction: (action: MenuAction) => void;
+  strings: Strings;
 }) {
   const { left, top } = clampMenuPosition(anchor);
 
@@ -430,23 +460,23 @@ function PopupMenu({
     >
       <MenuItem
         disabled={mode === "capture"}
-        label="Quick capture"
+        label={strings.menu.capture}
         onClick={() => onAction("capture")}
       />
       <MenuItem
         disabled={mode === "list"}
-        label="Reminders"
+        label={strings.menu.reminders}
         onClick={() => onAction("list")}
       />
       <MenuItem
         disabled={mode === "settings"}
-        label="Settings"
+        label={strings.menu.settings}
         onClick={() => onAction("settings")}
       />
       <div className="my-1 h-px bg-[var(--lin-border)]" />
-      <MenuItem label="Hide" onClick={() => onAction("hide")} />
+      <MenuItem label={strings.menu.hide} onClick={() => onAction("hide")} />
       <MenuItem
-        label="Quit"
+        label={strings.menu.quit}
         onClick={() => onAction("quit")}
         variant="danger"
       />
@@ -504,30 +534,32 @@ function ListPanel({
   isLoading,
   onMarkDone,
   reminders,
+  strings,
   updatingReminderId,
 }: {
   isLoading: boolean;
   onMarkDone: (reminder: ReminderNode) => void;
   reminders: ReminderNode[];
+  strings: Strings;
   updatingReminderId: string | undefined;
 }) {
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
       <header className="mb-2 flex items-center justify-between px-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--lin-text-dim)]">
-          Queued
+          {strings.list.queued}
         </p>
         <p className="text-xs text-[var(--lin-text-mute)]">
-          {reminders.length} pending
+          {strings.list.pending(reminders.length)}
         </p>
       </header>
       {isLoading && reminders.length === 0 ? (
         <p className="px-1 py-6 text-center text-sm text-[var(--lin-text-mute)]">
-          Loading...
+          {strings.list.loading}
         </p>
       ) : reminders.length === 0 ? (
         <p className="px-1 py-6 text-center text-sm text-[var(--lin-text-mute)]">
-          No reminders queued.
+          {strings.list.empty}
         </p>
       ) : (
         <ul className="max-h-[280px] overflow-y-auto">
@@ -552,7 +584,7 @@ function ListPanel({
                 onClick={() => onMarkDone(reminder)}
                 type="button"
               >
-                {updatingReminderId === reminder.id ? "..." : "Done"}
+                {updatingReminderId === reminder.id ? "..." : strings.list.done}
               </button>
             </li>
           ))}
@@ -563,22 +595,28 @@ function ListPanel({
 }
 
 function SettingsPanel({
+  activeLanguage,
   activeTheme,
+  onLanguageChange,
   onPrealertsChange,
   onThemeChange,
   prealertConfig,
+  strings,
 }: {
+  activeLanguage: LanguageId;
   activeTheme: ThemeId;
+  onLanguageChange: (next: LanguageId) => void;
   onPrealertsChange: (next: PrealertConfig) => void;
   onThemeChange: (theme: ThemeId) => void;
   prealertConfig: PrealertConfig;
+  strings: Strings;
 }) {
   return (
-    <section className="mt-3 max-h-[420px] overflow-y-auto rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-4 shadow-2xl backdrop-blur transition-colors">
+    <section className="mt-3 max-h-[520px] overflow-y-auto rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-4 shadow-2xl backdrop-blur transition-colors">
       <div className="grid gap-5">
         <SettingsSection
-          title="Appearance"
-          hint="Switch the look of the popup. New themes can be added later."
+          title={strings.settings.appearance.title}
+          hint={strings.settings.appearance.hint}
         >
           <div className="grid grid-cols-2 gap-2">
             {THEMES.map((theme) => (
@@ -586,6 +624,7 @@ function SettingsPanel({
                 isActive={theme.id === activeTheme}
                 key={theme.id}
                 onSelect={() => onThemeChange(theme.id)}
+                strings={strings}
                 theme={theme}
               />
             ))}
@@ -593,13 +632,30 @@ function SettingsPanel({
         </SettingsSection>
 
         <SettingsSection
-          title="Notifications"
-          hint={`Get reminded ahead of time. Up to ${MAX_PREALERTS} prealerts; the reminder auto-marks done at its due time.`}
+          title={strings.settings.notifications.title}
+          hint={strings.settings.notifications.hint(MAX_PREALERTS)}
         >
           <PrealertEditor
             config={prealertConfig}
             onChange={onPrealertsChange}
+            strings={strings}
           />
+        </SettingsSection>
+
+        <SettingsSection
+          title={strings.settings.language.title}
+          hint={strings.settings.language.hint}
+        >
+          <div className="grid grid-cols-2 gap-2">
+            {LANGUAGES.map((lang) => (
+              <LanguageCard
+                isActive={lang.id === activeLanguage}
+                key={lang.id}
+                language={lang}
+                onSelect={() => onLanguageChange(lang.id)}
+              />
+            ))}
+          </div>
         </SettingsSection>
       </div>
     </section>
@@ -609,9 +665,11 @@ function SettingsPanel({
 function PrealertEditor({
   config,
   onChange,
+  strings,
 }: {
   config: PrealertConfig;
   onChange: (next: PrealertConfig) => void;
+  strings: Strings;
 }) {
   const sorted = useMemo(() => sortDescending(config.offsets), [config.offsets]);
 
@@ -637,7 +695,7 @@ function PrealertEditor({
     <div className="grid gap-2">
       {sorted.length === 0 ? (
         <p className="text-xs text-[var(--lin-text-mute)]">
-          No prealerts. Reminders will only fire at their due time.
+          {strings.prealerts.emptyState}
         </p>
       ) : (
         sorted.map((offset, index) => (
@@ -648,6 +706,7 @@ function PrealertEditor({
             onDelete={() => deleteOffset(index)}
             onUpdate={(minutes) => updateOffset(index, minutes)}
             siblings={sorted}
+            strings={strings}
           />
         ))
       )}
@@ -657,7 +716,7 @@ function PrealertEditor({
           onClick={addOffset}
           type="button"
         >
-          + Add prealert
+          {strings.prealerts.addButton}
         </button>
       ) : null}
     </div>
@@ -670,12 +729,14 @@ function PrealertRow({
   onDelete,
   onUpdate,
   siblings,
+  strings,
 }: {
   index: number;
   offset: PrealertOffset;
   onDelete: () => void;
   onUpdate: (minutes: number) => void;
   siblings: PrealertOffset[];
+  strings: Strings;
 }) {
   const unit = bestUnit(offset.minutes);
   const value = unitValue(offset.minutes, unit);
@@ -697,7 +758,7 @@ function PrealertRow({
   return (
     <div className="flex items-center gap-2">
       <input
-        aria-label="Prealert value"
+        aria-label={strings.prealerts.valueLabel}
         className={`h-8 w-16 rounded-md border bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)] ${
           isDuplicate ? "border-[var(--lin-danger)]" : "border-[var(--lin-border)]"
         }`}
@@ -708,21 +769,23 @@ function PrealertRow({
         value={value}
       />
       <select
-        aria-label="Prealert unit"
+        aria-label={strings.prealerts.unitLabel}
         className="h-8 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)]"
         onChange={(event) => handleUnitChange(event.target.value as OffsetUnit)}
         value={unit}
       >
-        <option value="D">Days</option>
-        <option value="H">Hours</option>
-        <option value="M">Minutes</option>
+        <option value="D">{strings.prealerts.units.D}</option>
+        <option value="H">{strings.prealerts.units.H}</option>
+        <option value="M">{strings.prealerts.units.M}</option>
       </select>
-      <span className="text-xs text-[var(--lin-text-dim)]">before due</span>
+      <span className="text-xs text-[var(--lin-text-dim)]">
+        {strings.prealerts.suffix}
+      </span>
       <span className="ml-auto text-xs text-[var(--lin-text-mute)]">
-        {describeOffset(offset.minutes)}
+        {strings.prealerts.describe(offset.minutes)}
       </span>
       <button
-        aria-label="Remove prealert"
+        aria-label={strings.prealerts.removeLabel}
         className="ml-1 rounded-md px-2 py-1 text-xs leading-none text-[var(--lin-text-dim)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)]"
         onClick={onDelete}
         type="button"
@@ -760,15 +823,18 @@ function SettingsSection({
 function ThemeCard({
   isActive,
   onSelect,
+  strings,
   theme,
 }: {
   isActive: boolean;
   onSelect: () => void;
+  strings: Strings;
   theme: ThemeDefinition;
 }) {
   const ring = isActive
     ? "ring-2 ring-[var(--lin-text)]"
     : "ring-1 ring-[var(--lin-border)] hover:ring-[var(--lin-text-dim)]";
+  const localized = strings.themes[theme.id];
 
   return (
     <button
@@ -780,10 +846,10 @@ function ThemeCard({
       <ThemeSwatchPreview theme={theme} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-[var(--lin-text)]">
-          {theme.name}
+          {localized.name}
         </p>
         <p className="truncate text-xs text-[var(--lin-text-dim)]">
-          {theme.description}
+          {localized.description}
         </p>
       </div>
     </button>
@@ -808,6 +874,41 @@ function ThemeSwatchPreview({ theme }: { theme: ThemeDefinition }) {
   );
 }
 
+function LanguageCard({
+  isActive,
+  language,
+  onSelect,
+}: {
+  isActive: boolean;
+  language: LanguageDefinition;
+  onSelect: () => void;
+}) {
+  const ring = isActive
+    ? "ring-2 ring-[var(--lin-text)]"
+    : "ring-1 ring-[var(--lin-border)] hover:ring-[var(--lin-text-dim)]";
+
+  return (
+    <button
+      aria-pressed={isActive}
+      className={`flex items-center gap-3 rounded-xl bg-[var(--lin-bg-hover)] p-2.5 text-left transition ${ring}`}
+      onClick={onSelect}
+      type="button"
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--lin-border)] bg-[var(--lin-bg)] text-sm font-semibold uppercase text-[var(--lin-text)]">
+        {language.id}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-[var(--lin-text)]">
+          {language.name}
+        </p>
+        <p className="truncate text-xs text-[var(--lin-text-dim)]">
+          {language.sample}
+        </p>
+      </div>
+    </button>
+  );
+}
+
 function parseMode(payload: string): Mode {
   if (payload === "list") return "list";
   if (payload === "settings") return "settings";
@@ -817,9 +918,10 @@ function parseMode(payload: string): Mode {
 function previewLine(
   parseResult: ReminderParseResult | undefined,
   isSaving: boolean,
+  strings: Strings,
 ): string {
   if (isSaving) {
-    return "Saving...";
+    return strings.preview.saving;
   }
   if (!parseResult) {
     return " ";
@@ -827,7 +929,7 @@ function previewLine(
   if (parseResult.draft.scheduledAt) {
     return formatDateTime(parseResult.draft.scheduledAt);
   }
-  return "Needs a time - try \"in 30m\" or \"besok jam 7 pagi\"";
+  return strings.preview.needsTime;
 }
 
 async function hideMainWindow(): Promise<void> {
