@@ -4,7 +4,6 @@
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  color: #f4f4f5;
   background: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -18,4 +17,50 @@ body,
   margin: 0;
   height: 100%;
   background: transparent;
+}
+
+/* ---------------------------------------------------------------
+   Theme tokens.
+
+   Each theme is just a block of CSS variables under a
+   [data-theme="..."] selector. To add a new theme, add a new block
+   with the same variable names and register it in src/themes.ts.
+
+   Token semantics:
+     --lin-bg          : main surface (form, menu, panels)
+     --lin-bg-hover    : hover bg for clickable rows
+     --lin-border      : subtle borders
+     --lin-text        : primary text
+     --lin-text-dim    : secondary text (preview line, hints)
+     --lin-text-mute   : placeholder / disabled
+     --lin-accent      : hover/active highlight
+     --lin-danger      : destructive text (Quit)
+     --lin-danger-bg   : destructive hover background
+   --------------------------------------------------------------- */
+
+:root,
+[data-theme="dark"] {
+  --lin-bg: rgb(24 24 27 / 0.95);
+  --lin-bg-hover: rgb(39 39 42 / 0.85);
+  --lin-border: rgb(63 63 70 / 0.6);
+  --lin-text: rgb(244 244 245);
+  --lin-text-dim: rgb(113 113 122);
+  --lin-text-mute: rgb(82 82 91);
+  --lin-accent: rgb(228 228 231);
+  --lin-danger: rgb(252 165 165);
+  --lin-danger-bg: rgb(136 19 55 / 0.3);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --lin-bg: rgb(255 255 255 / 0.97);
+  --lin-bg-hover: rgb(244 244 245 / 0.95);
+  --lin-border: rgb(212 212 216 / 0.8);
+  --lin-text: rgb(24 24 27);
+  --lin-text-dim: rgb(82 82 91);
+  --lin-text-mute: rgb(161 161 170);
+  --lin-accent: rgb(39 39 42);
+  --lin-danger: rgb(190 18 60);
+  --lin-danger-bg: rgb(254 226 226);
+  color-scheme: light;
 }

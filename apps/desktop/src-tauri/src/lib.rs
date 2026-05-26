@@ -5,7 +5,7 @@ mod shortcut;
 use std::sync::Mutex;
 
 use data::{ReminderNode, ReminderStatusPatch, ReminderStore};
-use tauri::Manager;
+use tauri::{LogicalSize, Manager};
 
 struct AppState {
     reminders: Mutex<ReminderStore>,
@@ -90,6 +90,38 @@ fn hide_main_window(app: tauri::AppHandle) -> Result<(), String> {
     desktop::hide_main_window(&app).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn enter_capture_mode(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_capture_mode(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn enter_list_mode(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_list_mode(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn enter_settings_mode(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_settings_mode(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_popup_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window
+        .set_size(LogicalSize::new(620.0, height))
+        .map_err(|error| error.to_string())?;
+    window.center().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -111,7 +143,12 @@ pub fn run() {
             get_local_database_path,
             get_local_schema_version,
             show_main_window,
-            hide_main_window
+            hide_main_window,
+            enter_capture_mode,
+            enter_list_mode,
+            enter_settings_mode,
+            set_popup_height,
+            quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

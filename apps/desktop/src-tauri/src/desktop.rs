@@ -1,13 +1,24 @@
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Manager, WebviewWindow, WindowEvent,
+    App, AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const TRAY_MENU_SHOW: &str = "show_main_window";
+const TRAY_MENU_CAPTURE: &str = "show_capture";
+const TRAY_MENU_REMINDERS: &str = "show_reminders";
+const TRAY_MENU_SETTINGS: &str = "show_settings";
 const TRAY_MENU_HIDE: &str = "hide_main_window";
 const TRAY_MENU_QUIT: &str = "quit_app";
+
+const CAPTURE_SIZE: (f64, f64) = (620.0, 130.0);
+const LIST_SIZE: (f64, f64) = (620.0, 420.0);
+const SETTINGS_SIZE: (f64, f64) = (620.0, 360.0);
+
+const MODE_EVENT: &str = "linodea:mode";
+const MODE_CAPTURE: &str = "capture";
+const MODE_LIST: &str = "list";
+const MODE_SETTINGS: &str = "settings";
 
 pub fn setup_desktop_integration(app: &mut App) -> tauri::Result<()> {
     hide_main_window_on_close(app.handle())?;
@@ -15,16 +26,35 @@ pub fn setup_desktop_integration(app: &mut App) -> tauri::Result<()> {
     Ok(())
 }
 
+pub fn show_capture_mode(app: &AppHandle) -> tauri::Result<()> {
+    show_in_mode(app, CAPTURE_SIZE, MODE_CAPTURE)
+}
+
+pub fn show_list_mode(app: &AppHandle) -> tauri::Result<()> {
+    show_in_mode(app, LIST_SIZE, MODE_LIST)
+}
+
+pub fn show_settings_mode(app: &AppHandle) -> tauri::Result<()> {
+    show_in_mode(app, SETTINGS_SIZE, MODE_SETTINGS)
+}
+
 pub fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
-    let window = main_window(app)?;
-    window.show()?;
-    let _ = window.unminimize();
-    window.set_focus()?;
-    Ok(())
+    show_capture_mode(app)
 }
 
 pub fn hide_main_window(app: &AppHandle) -> tauri::Result<()> {
     main_window(app)?.hide()
+}
+
+fn show_in_mode(app: &AppHandle, size: (f64, f64), mode: &str) -> tauri::Result<()> {
+    let window = main_window(app)?;
+    window.set_size(LogicalSize::new(size.0, size.1))?;
+    let _ = window.center();
+    let _ = app.emit(MODE_EVENT, mode);
+    window.show()?;
+    let _ = window.unminimize();
+    window.set_focus()?;
+    Ok(())
 }
 
 fn hide_main_window_on_close(app: &AppHandle) -> tauri::Result<()> {
@@ -47,7 +77,9 @@ fn hide_main_window_on_close(app: &AppHandle) -> tauri::Result<()> {
 
 fn setup_tray(app: &mut App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
-        .text(TRAY_MENU_SHOW, "Show Linodea")
+        .text(TRAY_MENU_CAPTURE, "Quick capture")
+        .text(TRAY_MENU_REMINDERS, "Reminders")
+        .text(TRAY_MENU_SETTINGS, "Settings")
         .text(TRAY_MENU_HIDE, "Hide")
         .separator()
         .text(TRAY_MENU_QUIT, "Quit")
@@ -58,8 +90,14 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            TRAY_MENU_SHOW => {
-                let _ = show_main_window(app);
+            TRAY_MENU_CAPTURE => {
+                let _ = show_capture_mode(app);
+            }
+            TRAY_MENU_REMINDERS => {
+                let _ = show_list_mode(app);
+            }
+            TRAY_MENU_SETTINGS => {
+                let _ = show_settings_mode(app);
             }
             TRAY_MENU_HIDE => {
                 let _ = hide_main_window(app);
@@ -69,7 +107,7 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
         })
         .on_tray_icon_event(|tray, event| {
             if is_left_click_release(&event) {
-                let _ = show_main_window(tray.app_handle());
+                let _ = show_capture_mode(tray.app_handle());
             }
         });
 

@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Linodea",
-        "width": 560,
-        "height": 110,
-        "minWidth": 560,
-        "minHeight": 110,
+        "width": 620,
+        "height": 130,
+        "minWidth": 620,
+        "minHeight": 130,
         "resizable": false,
         "decorations": false,
         "transparent": true,
