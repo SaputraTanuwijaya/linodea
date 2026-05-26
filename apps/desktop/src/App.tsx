@@ -27,6 +27,21 @@ import {
   type ThemeDefinition,
   type ThemeId,
 } from "./themes";
+import {
+  bestUnit,
+  describeOffset,
+  getStoredPrealerts,
+  hasDuplicate,
+  MAX_PREALERTS,
+  nextAvailableOffset,
+  persistPrealerts,
+  sortDescending,
+  toMinutes,
+  unitValue,
+  type OffsetUnit,
+  type PrealertConfig,
+  type PrealertOffset,
+} from "./prealerts";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 const MODE_EVENT = "linodea:mode";
@@ -61,6 +76,9 @@ function App() {
   const [updatingReminderId, setUpdatingReminderId] = useState<string>();
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   const [theme, setThemeState] = useState<ThemeId>(() => getStoredTheme());
+  const [prealertConfig, setPrealertConfig] = useState<PrealertConfig>(() =>
+    getStoredPrealerts(),
+  );
 
   const parsedReminder = useMemo(
     () => (input.trim() ? parseReminder(input) : undefined),
@@ -72,6 +90,11 @@ function App() {
     applyTheme(next);
     persistTheme(next);
     setThemeState(next);
+  }, []);
+
+  const handlePrealertsChange = useCallback((next: PrealertConfig) => {
+    persistPrealerts(next);
+    setPrealertConfig(next);
   }, []);
 
   const refreshList = useCallback(async () => {
@@ -364,7 +387,9 @@ function App() {
         {mode === "settings" ? (
           <SettingsPanel
             activeTheme={theme}
+            onPrealertsChange={handlePrealertsChange}
             onThemeChange={handleThemeChange}
+            prealertConfig={prealertConfig}
           />
         ) : null}
       </div>
@@ -539,29 +564,172 @@ function ListPanel({
 
 function SettingsPanel({
   activeTheme,
+  onPrealertsChange,
   onThemeChange,
+  prealertConfig,
 }: {
   activeTheme: ThemeId;
+  onPrealertsChange: (next: PrealertConfig) => void;
   onThemeChange: (theme: ThemeId) => void;
+  prealertConfig: PrealertConfig;
 }) {
   return (
-    <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-4 shadow-2xl backdrop-blur transition-colors">
-      <SettingsSection
-        title="Appearance"
-        hint="Switch the look of the popup. New themes can be added later."
-      >
-        <div className="grid grid-cols-2 gap-2">
-          {THEMES.map((theme) => (
-            <ThemeCard
-              isActive={theme.id === activeTheme}
-              key={theme.id}
-              onSelect={() => onThemeChange(theme.id)}
-              theme={theme}
-            />
-          ))}
-        </div>
-      </SettingsSection>
+    <section className="mt-3 max-h-[420px] overflow-y-auto rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-4 shadow-2xl backdrop-blur transition-colors">
+      <div className="grid gap-5">
+        <SettingsSection
+          title="Appearance"
+          hint="Switch the look of the popup. New themes can be added later."
+        >
+          <div className="grid grid-cols-2 gap-2">
+            {THEMES.map((theme) => (
+              <ThemeCard
+                isActive={theme.id === activeTheme}
+                key={theme.id}
+                onSelect={() => onThemeChange(theme.id)}
+                theme={theme}
+              />
+            ))}
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          title="Notifications"
+          hint={`Get reminded ahead of time. Up to ${MAX_PREALERTS} prealerts; the reminder auto-marks done at its due time.`}
+        >
+          <PrealertEditor
+            config={prealertConfig}
+            onChange={onPrealertsChange}
+          />
+        </SettingsSection>
+      </div>
     </section>
+  );
+}
+
+function PrealertEditor({
+  config,
+  onChange,
+}: {
+  config: PrealertConfig;
+  onChange: (next: PrealertConfig) => void;
+}) {
+  const sorted = useMemo(() => sortDescending(config.offsets), [config.offsets]);
+
+  function updateOffset(index: number, minutes: number) {
+    if (minutes <= 0) return;
+    if (hasDuplicate(sorted, minutes, index)) return;
+    const nextOffsets = sorted.map((offset, i) =>
+      i === index ? { minutes } : offset,
+    );
+    onChange({ offsets: nextOffsets });
+  }
+
+  function deleteOffset(index: number) {
+    onChange({ offsets: sorted.filter((_, i) => i !== index) });
+  }
+
+  function addOffset() {
+    if (sorted.length >= MAX_PREALERTS) return;
+    onChange({ offsets: [...sorted, nextAvailableOffset(sorted)] });
+  }
+
+  return (
+    <div className="grid gap-2">
+      {sorted.length === 0 ? (
+        <p className="text-xs text-[var(--lin-text-mute)]">
+          No prealerts. Reminders will only fire at their due time.
+        </p>
+      ) : (
+        sorted.map((offset, index) => (
+          <PrealertRow
+            index={index}
+            key={`${index}-${offset.minutes}`}
+            offset={offset}
+            onDelete={() => deleteOffset(index)}
+            onUpdate={(minutes) => updateOffset(index, minutes)}
+            siblings={sorted}
+          />
+        ))
+      )}
+      {sorted.length < MAX_PREALERTS ? (
+        <button
+          className="w-fit rounded-md border border-dashed border-[var(--lin-border)] px-3 py-1.5 text-xs font-medium text-[var(--lin-text-dim)] transition hover:border-[var(--lin-text-dim)] hover:text-[var(--lin-text)]"
+          onClick={addOffset}
+          type="button"
+        >
+          + Add prealert
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function PrealertRow({
+  index,
+  offset,
+  onDelete,
+  onUpdate,
+  siblings,
+}: {
+  index: number;
+  offset: PrealertOffset;
+  onDelete: () => void;
+  onUpdate: (minutes: number) => void;
+  siblings: PrealertOffset[];
+}) {
+  const unit = bestUnit(offset.minutes);
+  const value = unitValue(offset.minutes, unit);
+  const candidateForCurrent = toMinutes(value, unit);
+  const isDuplicate =
+    candidateForCurrent !== offset.minutes &&
+    hasDuplicate(siblings, candidateForCurrent, index);
+
+  function handleValueChange(nextValueRaw: string) {
+    const parsed = Number.parseInt(nextValueRaw, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    onUpdate(toMinutes(parsed, unit));
+  }
+
+  function handleUnitChange(nextUnit: OffsetUnit) {
+    onUpdate(toMinutes(value, nextUnit));
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        aria-label="Prealert value"
+        className={`h-8 w-16 rounded-md border bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)] ${
+          isDuplicate ? "border-[var(--lin-danger)]" : "border-[var(--lin-border)]"
+        }`}
+        inputMode="numeric"
+        min={1}
+        onChange={(event) => handleValueChange(event.target.value)}
+        type="number"
+        value={value}
+      />
+      <select
+        aria-label="Prealert unit"
+        className="h-8 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)]"
+        onChange={(event) => handleUnitChange(event.target.value as OffsetUnit)}
+        value={unit}
+      >
+        <option value="D">Days</option>
+        <option value="H">Hours</option>
+        <option value="M">Minutes</option>
+      </select>
+      <span className="text-xs text-[var(--lin-text-dim)]">before due</span>
+      <span className="ml-auto text-xs text-[var(--lin-text-mute)]">
+        {describeOffset(offset.minutes)}
+      </span>
+      <button
+        aria-label="Remove prealert"
+        className="ml-1 rounded-md px-2 py-1 text-xs leading-none text-[var(--lin-text-dim)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)]"
+        onClick={onDelete}
+        type="button"
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 
