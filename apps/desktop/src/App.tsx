@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseReminder } from "@linodea/parser";
 import type {
+  ParserIssue,
   ReminderNode,
   ReminderParseResult,
   ReminderStatus,
@@ -384,7 +385,11 @@ function App() {
               value={input}
             />
             <p className="truncate text-xs leading-tight text-[var(--lin-text-dim)]">
-              {previewLine(parsedReminder, isSaving, strings)}
+              <PreviewLine
+                isSaving={isSaving}
+                parseResult={parsedReminder}
+                strings={strings}
+              />
             </p>
           </div>
           <button
@@ -915,21 +920,58 @@ function parseMode(payload: string): Mode {
   return "capture";
 }
 
-function previewLine(
-  parseResult: ReminderParseResult | undefined,
-  isSaving: boolean,
-  strings: Strings,
-): string {
+function PreviewLine({
+  isSaving,
+  parseResult,
+  strings,
+}: {
+  isSaving: boolean;
+  parseResult: ReminderParseResult | undefined;
+  strings: Strings;
+}) {
   if (isSaving) {
-    return strings.preview.saving;
+    return <>{strings.preview.saving}</>;
   }
   if (!parseResult) {
-    return " ";
+    return <>{" "}</>;
   }
-  if (parseResult.draft.scheduledAt) {
-    return formatDateTime(parseResult.draft.scheduledAt);
+
+  const base = parseResult.draft.scheduledAt
+    ? formatDateTime(parseResult.draft.scheduledAt)
+    : strings.preview.needsTime;
+
+  const autocorrects = parseResult.issues.filter(isDisplayableAutocorrect);
+
+  if (autocorrects.length === 0) {
+    return <>{base}</>;
   }
-  return strings.preview.needsTime;
+
+  return (
+    <>
+      <span>{base}</span>
+      <span className="text-[var(--lin-text-mute)]">
+        {" · "}
+        {formatAutocorrects(autocorrects)}
+      </span>
+    </>
+  );
+}
+
+function isDisplayableAutocorrect(issue: ParserIssue): boolean {
+  return (
+    issue.code === "autocorrect" &&
+    typeof issue.original === "string" &&
+    typeof issue.corrected === "string"
+  );
+}
+
+function formatAutocorrects(issues: ParserIssue[]): string {
+  const first = issues[0];
+  const head = `${first.original} → ${first.corrected}`;
+  if (issues.length === 1) {
+    return head;
+  }
+  return `${head} (+${issues.length - 1})`;
 }
 
 async function hideMainWindow(): Promise<void> {
