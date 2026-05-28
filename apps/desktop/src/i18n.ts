@@ -51,6 +51,7 @@ export interface Strings {
     appearance: { title: string; hint: string };
     notifications: { title: string; hint: (max: number) => string };
     language: { title: string; hint: string };
+    startup: { title: string; hint: string };
   };
   themes: {
     dark: { name: string; description: string };
@@ -72,6 +73,11 @@ export interface Strings {
     due: (title: string, when: string) => string;
     /** Body for prealert toasts. Takes minutes-of-lead so the formatter can localize the unit phrase. */
     prealert: (title: string, leadMinutes: number) => string;
+  };
+  startup: {
+    toggleLabel: string;
+    toggleHint: string;
+    unavailable: string;
   };
 }
 
@@ -128,6 +134,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Language",
         hint: "Interface language and parser tie-break preference.",
       },
+      startup: {
+        title: "Startup",
+        hint: "Launch Linodea when you sign in so reminders keep firing without opening it manually.",
+      },
     },
     themes: {
       dark: { name: "Dark", description: "Default. Easy on the eyes for night capture." },
@@ -146,6 +156,11 @@ const STRINGS: Record<LanguageId, Strings> = {
     notificationBody: {
       due: (title, when) => `${title} - ${when}`,
       prealert: (title, leadMinutes) => `In ${leadEnglish(leadMinutes)}: ${title}`,
+    },
+    startup: {
+      toggleLabel: "Launch on startup",
+      toggleHint: "Linodea starts hidden in the tray and waits for the global shortcut.",
+      unavailable: "Available only in the desktop app.",
     },
   },
   id: {
@@ -182,6 +197,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Bahasa",
         hint: "Bahasa antarmuka dan preferensi parser saat ada ambiguitas.",
       },
+      startup: {
+        title: "Saat dimulai",
+        hint: "Jalankan Linodea otomatis saat masuk agar pengingat tetap aktif tanpa perlu dibuka manual.",
+      },
     },
     themes: {
       dark: { name: "Gelap", description: "Bawaan. Nyaman untuk malam hari." },
@@ -200,6 +219,11 @@ const STRINGS: Record<LanguageId, Strings> = {
     notificationBody: {
       due: (title, when) => `${title} - ${when}`,
       prealert: (title, leadMinutes) => `Dalam ${leadIndonesian(leadMinutes)}: ${title}`,
+    },
+    startup: {
+      toggleLabel: "Jalankan saat startup",
+      toggleHint: "Linodea berjalan tersembunyi di tray dan menunggu pintasan global.",
+      unavailable: "Hanya tersedia di aplikasi desktop.",
     },
   },
 };

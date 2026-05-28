@@ -124,6 +124,10 @@ fn quit_app(app: tauri::AppHandle) {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
