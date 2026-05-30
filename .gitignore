@@ -6,6 +6,7 @@ dist/
 dist-ssr/
 build/
 .vite/
+tsconfig.node.tsbuildinfo
 
 # Rust and Tauri outputs
 target/

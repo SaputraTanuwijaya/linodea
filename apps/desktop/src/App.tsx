@@ -53,10 +53,10 @@ import {
   type Strings,
 } from "./i18n";
 import {
-  readAutostart,
-  writeAutostart,
+  StartupSection,
+  useAutostart,
   type AutostartState,
-} from "./startup";
+} from "@/features/startup";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 const MODE_EVENT = "linodea:mode";
@@ -97,10 +97,7 @@ function App() {
   const [language, setLanguageState] = useState<LanguageId>(() =>
     getStoredLanguage(),
   );
-  const [autostart, setAutostart] = useState<AutostartState>({
-    available: false,
-    enabled: false,
-  });
+  const [autostart, setAutostart] = useAutostart();
 
   const strings = useMemo(() => stringsFor(language), [language]);
 
@@ -130,11 +127,6 @@ function App() {
     setLanguageState(next);
   }, []);
 
-  const handleAutostartChange = useCallback(async (next: boolean) => {
-    const result = await writeAutostart(next);
-    setAutostart(result);
-  }, []);
-
   const refreshList = useCallback(async () => {
     if (!isTauriRuntime()) {
       return;
@@ -155,16 +147,6 @@ function App() {
       return;
     }
     void enableReminderNotifications().catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    void readAutostart().then((state) => {
-      if (mounted) setAutostart(state);
-    });
-    return () => {
-      mounted = false;
-    };
   }, []);
 
   useEffect(() => {
@@ -442,7 +424,7 @@ function App() {
             activeLanguage={language}
             activeTheme={theme}
             autostart={autostart}
-            onAutostartChange={handleAutostartChange}
+            onAutostartChange={setAutostart}
             onLanguageChange={handleLanguageChange}
             onPrealertsChange={handlePrealertsChange}
             onThemeChange={handleThemeChange}
@@ -697,7 +679,7 @@ function SettingsPanel({
           title={strings.settings.startup.title}
           hint={strings.settings.startup.hint}
         >
-          <StartupToggle
+          <StartupSection
             autostart={autostart}
             onChange={onAutostartChange}
             strings={strings}
@@ -705,47 +687,6 @@ function SettingsPanel({
         </SettingsSection>
       </div>
     </section>
-  );
-}
-
-function StartupToggle({
-  autostart,
-  onChange,
-  strings,
-}: {
-  autostart: AutostartState;
-  onChange: (next: boolean) => void;
-  strings: Strings;
-}) {
-  const { available, enabled } = autostart;
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-3 py-2.5">
-      <div className="min-w-0">
-        <p className="text-sm text-[var(--lin-text)]">
-          {strings.startup.toggleLabel}
-        </p>
-        <p className="mt-0.5 text-xs text-[var(--lin-text-mute)]">
-          {available ? strings.startup.toggleHint : strings.startup.unavailable}
-        </p>
-      </div>
-      <button
-        aria-checked={enabled}
-        aria-label={strings.startup.toggleLabel}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-[var(--lin-border)] transition-colors ${
-          enabled ? "bg-[var(--lin-accent)]" : "bg-[var(--lin-text-mute)]"
-        } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
-        disabled={!available}
-        onClick={() => onChange(!enabled)}
-        role="switch"
-        type="button"
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-[var(--lin-bg)] shadow-sm transition-transform ${
-            enabled ? "translate-x-6" : "translate-x-1"
-          }`}
-        />
-      </button>
-    </div>
   );
 }
 
