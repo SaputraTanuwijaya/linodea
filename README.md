@@ -12,9 +12,21 @@ on focus loss. Tray icon and close-to-tray remain. Local notifications v0 polls
 due reminders and sends one deduped desktop toast per due reminder while the app
 is running.
 
-## Category
+## Architecture
 
-Linodea is desktop-first productivity software, not a web app. It uses web technologies for the desktop UI, but the product depends on native desktop behavior such as a global shortcut, tray/background execution, local notifications, startup behavior, and local storage.
+Linodea follows the **local-first software** model: the device is the source of truth, and the network is optional. Reminders are stored in a local SQLite database; nothing leaves the device.
+
+The app uses a **native shell + web frontend** pattern via Tauri v2. A small Rust binary owns the OS surface — tray icon, global shortcut, notifications, autostart, the SQLite file — and a React/TypeScript UI renders inside a system WebView. The two halves talk through a typed command boundary.
+
+Why this stack:
+
+- **Offline-by-default** — no server to wait on, no account to create.
+- **Privacy** — data never leaves the device.
+- **Fast cold start** — opening the popup is instant; no network round-trip.
+- **OS-native feel** — real global shortcut, real tray icon, real toast notifications.
+- **Small installer, one codebase** — Windows / macOS / Linux ship from the same source.
+
+This pattern fits productivity tools where cloud sync is overkill, where reliability matters more than collaboration, and where the user owns their data. It is the wrong choice when an app needs real-time multi-user sync, cross-device hand-off, or rich server-side processing — none of which Linodea needs in the MVP.
 
 ## Core Flow
 
