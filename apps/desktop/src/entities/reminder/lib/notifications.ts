@@ -89,7 +89,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   let nextFireMs = Infinity;
 
   for (const reminder of actionable) {
-    const dueMs = new Date(reminder.scheduledAt).getTime();
+    const dueMs = effectiveDueMs(reminder);
     if (!Number.isFinite(dueMs)) {
       continue;
     }
@@ -163,11 +163,24 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   };
 }
 
+/**
+ * The instant a reminder should actually fire. A snoozed reminder fires at its
+ * `snoozedUntil`, not its original `scheduledAt`; everything else fires at
+ * `scheduledAt`. Prealerts and the due/auto-done step both key off this.
+ */
+function effectiveDueMs(reminder: ReminderNode): number {
+  if (reminder.status === "snoozed" && reminder.snoozedUntil) {
+    const snoozed = new Date(reminder.snoozedUntil).getTime();
+    if (Number.isFinite(snoozed)) return snoozed;
+  }
+  return new Date(reminder.scheduledAt).getTime();
+}
+
 function formatScheduledTime(reminder: ReminderNode): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(reminder.scheduledAt));
+  }).format(new Date(effectiveDueMs(reminder)));
 }
 
 function readFireStore(): FireStore {

@@ -38,6 +38,15 @@ export interface Strings {
     loading: string;
     empty: string;
     done: string;
+    snooze: string;
+    edit: string;
+    delete: string;
+    save: string;
+    cancel: string;
+    editPlaceholder: string;
+    snooze10m: string;
+    snooze1h: string;
+    snoozeTomorrow: string;
   };
   settings: {
     appearance: { title: string; hint: string };
@@ -96,6 +105,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       loading: "Loading...",
       empty: "No reminders queued.",
       done: "Done",
+      snooze: "Snooze",
+      edit: "Edit",
+      delete: "Delete",
+      save: "Save",
+      cancel: "Cancel",
+      editPlaceholder: "Edit reminder text",
+      snooze10m: "+10 min",
+      snooze1h: "+1 hour",
+      snoozeTomorrow: "Tomorrow 9am",
     },
     settings: {
       appearance: {
@@ -159,6 +177,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       loading: "Memuat...",
       empty: "Belum ada pengingat.",
       done: "Selesai",
+      snooze: "Tunda",
+      edit: "Ubah",
+      delete: "Hapus",
+      save: "Simpan",
+      cancel: "Batal",
+      editPlaceholder: "Ubah teks pengingat",
+      snooze10m: "+10 mnt",
+      snooze1h: "+1 jam",
+      snoozeTomorrow: "Besok jam 9",
     },
     settings: {
       appearance: {

@@ -4,7 +4,7 @@ mod shortcut;
 
 use std::sync::Mutex;
 
-use data::{ReminderNode, ReminderStatusPatch, ReminderStore};
+use data::{ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore};
 use tauri::{LogicalSize, Manager};
 
 struct AppState {
@@ -58,6 +58,29 @@ fn update_reminder_node_status(
         .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
 
     store.update_reminder_status(patch)
+}
+
+#[tauri::command]
+fn update_reminder_node(
+    state: tauri::State<'_, AppState>,
+    patch: ReminderEditPatch,
+) -> Result<ReminderNode, String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.update_reminder(patch)
+}
+
+#[tauri::command]
+fn delete_reminder_node(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.delete_reminder(&id)
 }
 
 #[tauri::command]
@@ -144,6 +167,8 @@ pub fn run() {
             list_reminder_nodes,
             list_due_reminder_nodes,
             update_reminder_node_status,
+            update_reminder_node,
+            delete_reminder_node,
             get_local_database_path,
             get_local_schema_version,
             show_main_window,

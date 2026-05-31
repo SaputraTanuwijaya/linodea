@@ -9,8 +9,9 @@ markers, and conjunctions), and a local SQLite data layer with status and
 due-reminder queries. The capture surface is a frameless floating popup: pressing
 `Ctrl+Alt+Shift+Space` summons a small dark rounded textbox, typing a reminder
 shows the parsed time inline, and Enter saves and dismisses. The popup auto-hides
-on focus loss. Tray icon and close-to-tray remain. Settings cover theme, language,
-configurable prealerts, and launch-on-startup. Notifications fire user-set
+on focus loss. Tray icon and close-to-tray remain. The tray's Reminders view lists
+queued reminders with per-row done / snooze / edit / delete. Settings cover theme,
+language, configurable prealerts, and launch-on-startup. Notifications fire user-set
 prealerts plus a due-time toast that auto-marks the reminder done, scheduled by a
 precise in-process timer (second-level accuracy while the app is running).
 

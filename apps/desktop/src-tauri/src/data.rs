@@ -95,6 +95,25 @@ pub struct ReminderStatusPatch {
     pub snoozed_until: Option<String>,
 }
 
+/// Full-content edit of an existing reminder. Distinct from `ReminderStatusPatch`
+/// (status/lifecycle) — this changes the user-authored fields, re-derived by
+/// re-parsing the edited raw text on the UI side. Also the primitive a future
+/// AI-assisted chain editor would call to "alter" a node.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderEditPatch {
+    pub id: String,
+    pub title: String,
+    pub raw_input: String,
+    pub scheduled_at: String,
+    pub timezone: String,
+    #[serde(rename = "type")]
+    pub reminder_type: String,
+    pub category: String,
+    pub checklist: Vec<String>,
+    pub updated_at: String,
+}
+
 pub struct ReminderStore {
     connection: Connection,
     database_path: PathBuf,
@@ -331,6 +350,66 @@ impl ReminderStore {
             .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
     }
 
+    pub fn update_reminder(&self, patch: ReminderEditPatch) -> Result<ReminderNode, String> {
+        validate_edit_patch(&patch)?;
+
+        let checklist_json = serde_json::to_string(&patch.checklist).map_err(to_store_error)?;
+        let changed = self
+            .connection
+            .execute(
+                r#"
+                UPDATE reminder_nodes
+                SET
+                  title = ?2,
+                  raw_input = ?3,
+                  scheduled_at = ?4,
+                  timezone = ?5,
+                  reminder_type = ?6,
+                  category = ?7,
+                  checklist_json = ?8,
+                  updated_at = ?9,
+                  sync_version = sync_version + 1
+                WHERE id = ?1
+                "#,
+                params![
+                    patch.id,
+                    patch.title,
+                    patch.raw_input,
+                    patch.scheduled_at,
+                    patch.timezone,
+                    patch.reminder_type,
+                    patch.category,
+                    checklist_json,
+                    patch.updated_at,
+                ],
+            )
+            .map_err(to_store_error)?;
+
+        if changed == 0 {
+            return Err("Reminder was not found.".to_string());
+        }
+
+        self.get_reminder_by_id(&patch.id)?
+            .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
+    }
+
+    pub fn delete_reminder(&self, id: &str) -> Result<(), String> {
+        if id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+
+        let changed = self
+            .connection
+            .execute("DELETE FROM reminder_nodes WHERE id = ?1", params![id])
+            .map_err(to_store_error)?;
+
+        if changed == 0 {
+            return Err("Reminder was not found.".to_string());
+        }
+
+        Ok(())
+    }
+
     pub fn schema_version(&self) -> Result<i64, String> {
         self.connection
             .query_row(
@@ -498,6 +577,54 @@ fn validate_status_patch(patch: &ReminderStatusPatch) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_edit_patch(patch: &ReminderEditPatch) -> Result<(), String> {
+    if patch.id.trim().is_empty() {
+        return Err("Reminder id is required.".to_string());
+    }
+
+    if patch.title.trim().is_empty() {
+        return Err("Reminder title is required.".to_string());
+    }
+
+    if patch.raw_input.trim().is_empty() {
+        return Err("Reminder raw input is required.".to_string());
+    }
+
+    if patch.scheduled_at.trim().is_empty() {
+        return Err("Reminder scheduled time is required.".to_string());
+    }
+
+    if patch.timezone.trim().is_empty() {
+        return Err("Reminder timezone is required.".to_string());
+    }
+
+    if patch.updated_at.trim().is_empty() {
+        return Err("Reminder update time is required.".to_string());
+    }
+
+    if !matches!(
+        patch.reminder_type.as_str(),
+        "main" | "prep" | "followup" | "deadline" | "cooldown"
+    ) {
+        return Err("Reminder type is not supported.".to_string());
+    }
+
+    if !matches!(
+        patch.category.as_str(),
+        "university"
+            | "investing"
+            | "personal"
+            | "tutoring"
+            | "urgent"
+            | "waiting"
+            | "uncategorized"
+    ) {
+        return Err("Reminder category is not supported.".to_string());
+    }
+
+    Ok(())
+}
+
 fn to_store_error(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
@@ -612,6 +739,76 @@ mod tests {
         });
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn updates_editable_fields_and_bumps_sync_version() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("reminder-1"))
+            .expect("reminder is created");
+
+        let updated = store
+            .update_reminder(ReminderEditPatch {
+                id: "reminder-1".to_string(),
+                title: "Submit grant form".to_string(),
+                raw_input: "besok jam 9 pagi submit grant form".to_string(),
+                scheduled_at: "2026-05-23T02:00:00.000Z".to_string(),
+                timezone: "Asia/Jakarta".to_string(),
+                reminder_type: "deadline".to_string(),
+                category: "university".to_string(),
+                checklist: vec!["draft".to_string()],
+                updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+            })
+            .expect("reminder is edited");
+
+        assert_eq!(updated.title, "Submit grant form");
+        assert_eq!(updated.scheduled_at, "2026-05-23T02:00:00.000Z");
+        assert_eq!(updated.reminder_type, "deadline");
+        assert_eq!(updated.category, "university");
+        assert_eq!(updated.checklist, vec!["draft"]);
+        assert_eq!(updated.sync_version, 1);
+        // Status/created fields are untouched by an edit.
+        assert_eq!(updated.status, "pending");
+        assert_eq!(updated.created_at, "2026-05-22T12:00:00.000Z");
+    }
+
+    #[test]
+    fn update_rejects_unknown_category() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("reminder-1"))
+            .expect("reminder is created");
+
+        let result = store.update_reminder(ReminderEditPatch {
+            id: "reminder-1".to_string(),
+            title: "Whatever".to_string(),
+            raw_input: "in 1h whatever".to_string(),
+            scheduled_at: "2026-05-22T13:30:00.000Z".to_string(),
+            timezone: "Asia/Jakarta".to_string(),
+            reminder_type: "main".to_string(),
+            category: "not-a-category".to_string(),
+            checklist: vec![],
+            updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn deletes_a_reminder() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("reminder-1"))
+            .expect("reminder is created");
+
+        store
+            .delete_reminder("reminder-1")
+            .expect("reminder is deleted");
+        assert_eq!(store.list_reminders().expect("lists").len(), 0);
+
+        // Deleting again is an error (nothing to remove).
+        assert!(store.delete_reminder("reminder-1").is_err());
     }
 
     fn sample_reminder(id: &str) -> ReminderNode {

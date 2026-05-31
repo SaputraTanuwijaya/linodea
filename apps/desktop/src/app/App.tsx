@@ -243,7 +243,12 @@ function App() {
         />
 
         {mode === "list" ? (
-          <ListPage refreshKey={listRefreshKey} strings={strings} />
+          <ListPage
+            language={language}
+            onMutate={() => void schedulerRef.current?.sync()}
+            refreshKey={listRefreshKey}
+            strings={strings}
+          />
         ) : null}
 
         {mode === "settings" ? (

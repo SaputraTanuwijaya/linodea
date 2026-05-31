@@ -4,8 +4,11 @@
 
 export {
   createReminderNodeCommand,
+  deleteReminderNode,
   listReminderNodes,
+  updateReminderNode,
   updateReminderNodeStatus,
+  type ReminderEditPatch,
   type ReminderStatusPatch,
 } from "./api/commands";
 export {

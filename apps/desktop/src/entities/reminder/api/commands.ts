@@ -7,7 +7,12 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { ReminderNode, ReminderStatus } from "@linodea/types";
+import type {
+  ReminderCategory,
+  ReminderNode,
+  ReminderStatus,
+  ReminderType,
+} from "@linodea/types";
 
 export interface ReminderStatusPatch {
   id: string;
@@ -15,6 +20,20 @@ export interface ReminderStatusPatch {
   updatedAt: string;
   completedAt?: string;
   snoozedUntil?: string;
+}
+
+/** Full-content edit of a reminder's user-authored fields (re-derived from a
+ * re-parse on the UI side). Separate from status/lifecycle changes. */
+export interface ReminderEditPatch {
+  id: string;
+  title: string;
+  rawInput: string;
+  scheduledAt: string;
+  timezone: string;
+  type: ReminderType;
+  category: ReminderCategory;
+  checklist: string[];
+  updatedAt: string;
 }
 
 export function createReminderNodeCommand(reminder: ReminderNode): Promise<ReminderNode> {
@@ -29,4 +48,12 @@ export function updateReminderNodeStatus(
   patch: ReminderStatusPatch,
 ): Promise<ReminderNode> {
   return invoke<ReminderNode>("update_reminder_node_status", { patch });
+}
+
+export function updateReminderNode(patch: ReminderEditPatch): Promise<ReminderNode> {
+  return invoke<ReminderNode>("update_reminder_node", { patch });
+}
+
+export function deleteReminderNode(id: string): Promise<void> {
+  return invoke<void>("delete_reminder_node", { id });
 }
