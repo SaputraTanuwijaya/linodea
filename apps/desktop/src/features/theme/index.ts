@@ -11,3 +11,4 @@ export {
 } from "./model/themes";
 export { useTheme } from "./model/useTheme";
 export { ThemeSection } from "./ui/ThemeSection";
+export { themeSettingsSection } from "./settingsSection";

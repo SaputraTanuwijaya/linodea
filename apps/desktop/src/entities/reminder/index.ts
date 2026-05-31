@@ -1,10 +1,18 @@
 /**
  * Public surface for the reminder entity.
- *
- * Today exposes the notification polling driver. The typed Tauri command
- * wrappers (`entities/reminder/api/commands.ts`) land in Phase 3.
  */
 
+export {
+  createReminderNodeCommand,
+  listReminderNodes,
+  updateReminderNodeStatus,
+  type ReminderStatusPatch,
+} from "./api/commands";
+export {
+  byScheduledAt,
+  createReminderNode,
+  isActionable,
+} from "./model/reminder";
 export {
   DUE_NOTIFICATION_POLL_INTERVAL_MS,
   enableReminderNotifications,

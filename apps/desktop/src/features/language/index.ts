@@ -16,3 +16,4 @@ export {
 } from "./model/language";
 export { useLanguage } from "./model/useLanguage";
 export { LanguageSection } from "./ui/LanguageSection";
+export { languageSettingsSection } from "./settingsSection";

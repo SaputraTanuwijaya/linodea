@@ -15,3 +15,4 @@ export {
 } from "./model/prealerts";
 export { usePrealerts } from "./model/usePrealerts";
 export { PrealertsSection } from "./ui/PrealertsSection";
+export { prealertsSettingsSection } from "./settingsSection";

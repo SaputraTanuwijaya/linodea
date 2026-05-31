@@ -6,4 +6,5 @@
 
 export { useAutostart } from "./model/useAutostart";
 export { StartupSection } from "./ui/StartupSection";
+export { startupSettingsSection } from "./settingsSection";
 export type { AutostartState } from "./model/startup";

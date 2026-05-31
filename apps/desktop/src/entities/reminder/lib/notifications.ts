@@ -12,17 +12,19 @@
  * v1 store (array of "fired due" ids) is migrated on first read.
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import type { ReminderNode, ReminderStatus } from "@linodea/types";
+import type { ReminderNode } from "@linodea/types";
 
 import { getStoredLanguage } from "@/features/language";
 import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
 import { stringsFor } from "@/shared/i18n";
+
+import { listReminderNodes, updateReminderNodeStatus } from "../api/commands";
+import { isActionable } from "../model/reminder";
 
 export const DUE_NOTIFICATION_POLL_INTERVAL_MS = 15_000;
 
@@ -45,13 +47,6 @@ interface FireRecord {
 }
 
 type FireStore = Record<string, FireRecord>;
-
-interface ReminderStatusPatch {
-  id: string;
-  status: ReminderStatus;
-  updatedAt: string;
-  completedAt?: string;
-}
 
 export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
   return (await isPermissionGranted()) ? "granted" : "unknown";
@@ -79,7 +74,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     return { sentCount: 0, autoDoneCount: 0, permissionGranted };
   }
 
-  const reminders = await invoke<ReminderNode[]>("list_reminder_nodes");
+  const reminders = await listReminderNodes();
   const actionable = reminders.filter(isActionable);
   const sortedOffsets = sortDescending(getStoredPrealerts().offsets);
   const strings = stringsFor(getStoredLanguage());
@@ -125,13 +120,11 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 
       const nowIso = new Date(now).toISOString();
       try {
-        await invoke<ReminderNode>("update_reminder_node_status", {
-          patch: {
-            id: reminder.id,
-            status: "done",
-            updatedAt: nowIso,
-            completedAt: nowIso,
-          } satisfies ReminderStatusPatch,
+        await updateReminderNodeStatus({
+          id: reminder.id,
+          status: "done",
+          updatedAt: nowIso,
+          completedAt: nowIso,
         });
         autoDoneCount += 1;
       } catch {
@@ -149,14 +142,6 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 
   writeFireStore(store);
   return { sentCount, autoDoneCount, permissionGranted };
-}
-
-function isActionable(reminder: ReminderNode): boolean {
-  return (
-    reminder.status === "pending" ||
-    reminder.status === "missed" ||
-    reminder.status === "snoozed"
-  );
 }
 
 function formatScheduledTime(reminder: ReminderNode): string {
