@@ -84,19 +84,6 @@ export function toMinutes(value: number, unit: OffsetUnit): number {
   return safe;
 }
 
-export function describeOffset(minutes: number): string {
-  if (minutes <= 0) return "";
-  if (minutes % MINUTES_PER_DAY === 0) {
-    const days = minutes / MINUTES_PER_DAY;
-    return days === 1 ? "1 day before" : `${days} days before`;
-  }
-  if (minutes % MINUTES_PER_HOUR === 0) {
-    const hours = minutes / MINUTES_PER_HOUR;
-    return hours === 1 ? "1 hour before" : `${hours} hours before`;
-  }
-  return minutes === 1 ? "1 min before" : `${minutes} min before`;
-}
-
 export function sortDescending(offsets: PrealertOffset[]): PrealertOffset[] {
   return [...offsets].sort((a, b) => b.minutes - a.minutes);
 }

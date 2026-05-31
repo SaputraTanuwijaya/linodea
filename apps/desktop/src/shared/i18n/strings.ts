@@ -1,31 +1,23 @@
 /**
- * UI string registry + language preference.
+ * UI string registry — interface, EN + ID tables, and accessor.
  *
- * Mirrors the shape of `themes.ts`:
- *   - `LANGUAGES` is the registry consumed by the Settings picker.
- *   - Each language ships a flat `Strings` object indexed by dotted keys.
- *   - Persistence via localStorage at `linodea.language.v1`.
+ * Lives in `shared/i18n` because every feature consumes it. Per-feature
+ * string sections (settings.startup, prealerts, etc.) live here for now to
+ * keep EN and ID in lockstep — splitting strings across features comes later
+ * if the file gets unwieldy.
  *
- * To add a new language:
- *   1. Add a `LanguageDefinition` entry to `LANGUAGES`.
- *   2. Add a parallel `Strings` object to `STRINGS`.
- *   3. Widen the `LanguageId` union to include the new id.
+ * Parameterized strings are functions so the formatter can localize unit
+ * phrases (`1 day` vs `1 hari`).
  *
- * The language id matches the parser's `LangTag` ("en" | "id"), so the same
- * value can be passed to `parseReminder({ preferredLanguage })`.
+ * Adding a language: add a parallel `Strings` object to `STRINGS`, widen the
+ * `LanguageId` union, and register the language definition in
+ * `features/language`.
  */
 
 import type { LangTag } from "@linodea/parser";
 
+/** Language id. Matches the parser's LangTag so it can be threaded through. */
 export type LanguageId = LangTag;
-
-export interface LanguageDefinition {
-  id: LanguageId;
-  name: string;
-  description: string;
-  /** Short bilingual-friendly sample shown on the picker card. */
-  sample: string;
-}
 
 export interface Strings {
   menu: {
@@ -81,23 +73,8 @@ export interface Strings {
   };
 }
 
-const STORAGE_KEY = "linodea.language.v1";
-const DEFAULT_LANGUAGE: LanguageId = "en";
-
-export const LANGUAGES: LanguageDefinition[] = [
-  {
-    id: "en",
-    name: "English",
-    description: "Interface in English. Parser breaks ties toward English.",
-    sample: "tomorrow 7am tutoring with Kevin",
-  },
-  {
-    id: "id",
-    name: "Indonesian",
-    description: "Antarmuka berbahasa Indonesia. Parser memilih kata Indonesia saat ragu.",
-    sample: "besok jam 7 pagi les privat Kevin",
-  },
-];
+const MINUTES_PER_DAY = 24 * 60;
+const MINUTES_PER_HOUR = 60;
 
 const STRINGS: Record<LanguageId, Strings> = {
   en: {
@@ -228,6 +205,12 @@ const STRINGS: Record<LanguageId, Strings> = {
   },
 };
 
+export function stringsFor(language: LanguageId): Strings {
+  return STRINGS[language];
+}
+
+// --- Lead-time formatters (used by notificationBody.prealert) --------------
+
 function leadEnglish(minutes: number): string {
   if (minutes % MINUTES_PER_DAY === 0 && minutes >= MINUTES_PER_DAY) {
     const days = minutes / MINUTES_PER_DAY;
@@ -250,34 +233,7 @@ function leadIndonesian(minutes: number): string {
   return `${minutes} menit`;
 }
 
-export function getStoredLanguage(): LanguageId {
-  if (typeof window === "undefined") return DEFAULT_LANGUAGE;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  return isLanguageId(stored) ? stored : DEFAULT_LANGUAGE;
-}
-
-export function persistLanguage(language: LanguageId): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, language);
-}
-
-export function applyLanguage(language: LanguageId): void {
-  if (typeof document === "undefined") return;
-  document.documentElement.lang = language;
-}
-
-export function stringsFor(language: LanguageId): Strings {
-  return STRINGS[language];
-}
-
-function isLanguageId(value: string | null): value is LanguageId {
-  return value === "en" || value === "id";
-}
-
-// --- Offset descriptors per language ---------------------------------------
-
-const MINUTES_PER_DAY = 24 * 60;
-const MINUTES_PER_HOUR = 60;
+// --- Offset descriptors per language (used by prealerts.describe) ----------
 
 function describeEnglish(minutes: number): string {
   if (minutes <= 0) return "";

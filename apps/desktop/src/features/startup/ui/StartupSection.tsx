@@ -5,7 +5,7 @@
  * no hint paragraph (those live on the section wrapper).
  */
 
-import type { Strings } from "@/i18n";
+import type { Strings } from "@/shared/i18n";
 
 import type { AutostartState } from "../model/startup";
 

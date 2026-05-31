@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseReminder } from "@linodea/parser";
 import type {
-  ParserIssue,
   ReminderNode,
   ReminderParseResult,
   ReminderStatus,
@@ -15,48 +14,27 @@ import type {
 } from "react";
 
 import "./App.css";
+import { PreviewLine } from "@/features/autocorrect-display";
+import { LanguageSection, useLanguage, type LanguageId } from "@/features/language";
 import {
-  DUE_NOTIFICATION_POLL_INTERVAL_MS,
-  enableReminderNotifications,
-  notifyDueReminders,
-} from "./notifications";
-import {
-  applyTheme,
-  getStoredTheme,
-  persistTheme,
-  THEMES,
-  type ThemeDefinition,
-  type ThemeId,
-} from "./themes";
-import {
-  bestUnit,
-  getStoredPrealerts,
-  hasDuplicate,
   MAX_PREALERTS,
-  nextAvailableOffset,
-  persistPrealerts,
-  sortDescending,
-  toMinutes,
-  unitValue,
-  type OffsetUnit,
+  PrealertsSection,
+  usePrealerts,
   type PrealertConfig,
-  type PrealertOffset,
-} from "./prealerts";
-import {
-  applyLanguage,
-  getStoredLanguage,
-  LANGUAGES,
-  persistLanguage,
-  stringsFor,
-  type LanguageDefinition,
-  type LanguageId,
-  type Strings,
-} from "./i18n";
+} from "@/features/prealerts";
 import {
   StartupSection,
   useAutostart,
   type AutostartState,
 } from "@/features/startup";
+import { ThemeSection, useTheme, type ThemeId } from "@/features/theme";
+import {
+  DUE_NOTIFICATION_POLL_INTERVAL_MS,
+  enableReminderNotifications,
+  notifyDueReminders,
+} from "@/entities/reminder";
+import { stringsFor, type Strings } from "@/shared/i18n";
+import { formatDateTime } from "@/shared/lib";
 
 const DEVICE_ID_STORAGE_KEY = "linodea.deviceId";
 const MODE_EVENT = "linodea:mode";
@@ -90,13 +68,9 @@ function App() {
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [updatingReminderId, setUpdatingReminderId] = useState<string>();
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
-  const [theme, setThemeState] = useState<ThemeId>(() => getStoredTheme());
-  const [prealertConfig, setPrealertConfig] = useState<PrealertConfig>(() =>
-    getStoredPrealerts(),
-  );
-  const [language, setLanguageState] = useState<LanguageId>(() =>
-    getStoredLanguage(),
-  );
+  const [theme, setTheme] = useTheme();
+  const [prealertConfig, setPrealertConfig] = usePrealerts();
+  const [language, setLanguage] = useLanguage();
   const [autostart, setAutostart] = useAutostart();
 
   const strings = useMemo(() => stringsFor(language), [language]);
@@ -109,23 +83,6 @@ function App() {
     [input, language],
   );
   const canSave = Boolean(parsedReminder?.draft.scheduledAt && input.trim());
-
-  const handleThemeChange = useCallback((next: ThemeId) => {
-    applyTheme(next);
-    persistTheme(next);
-    setThemeState(next);
-  }, []);
-
-  const handlePrealertsChange = useCallback((next: PrealertConfig) => {
-    persistPrealerts(next);
-    setPrealertConfig(next);
-  }, []);
-
-  const handleLanguageChange = useCallback((next: LanguageId) => {
-    applyLanguage(next);
-    persistLanguage(next);
-    setLanguageState(next);
-  }, []);
 
   const refreshList = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -425,9 +382,9 @@ function App() {
             activeTheme={theme}
             autostart={autostart}
             onAutostartChange={setAutostart}
-            onLanguageChange={handleLanguageChange}
-            onPrealertsChange={handlePrealertsChange}
-            onThemeChange={handleThemeChange}
+            onLanguageChange={setLanguage}
+            onPrealertsChange={setPrealertConfig}
+            onThemeChange={setTheme}
             prealertConfig={prealertConfig}
             strings={strings}
           />
@@ -635,24 +592,18 @@ function SettingsPanel({
           title={strings.settings.appearance.title}
           hint={strings.settings.appearance.hint}
         >
-          <div className="grid grid-cols-2 gap-2">
-            {THEMES.map((theme) => (
-              <ThemeCard
-                isActive={theme.id === activeTheme}
-                key={theme.id}
-                onSelect={() => onThemeChange(theme.id)}
-                strings={strings}
-                theme={theme}
-              />
-            ))}
-          </div>
+          <ThemeSection
+            activeTheme={activeTheme}
+            onThemeChange={onThemeChange}
+            strings={strings}
+          />
         </SettingsSection>
 
         <SettingsSection
           title={strings.settings.notifications.title}
           hint={strings.settings.notifications.hint(MAX_PREALERTS)}
         >
-          <PrealertEditor
+          <PrealertsSection
             config={prealertConfig}
             onChange={onPrealertsChange}
             strings={strings}
@@ -663,16 +614,10 @@ function SettingsPanel({
           title={strings.settings.language.title}
           hint={strings.settings.language.hint}
         >
-          <div className="grid grid-cols-2 gap-2">
-            {LANGUAGES.map((lang) => (
-              <LanguageCard
-                isActive={lang.id === activeLanguage}
-                key={lang.id}
-                language={lang}
-                onSelect={() => onLanguageChange(lang.id)}
-              />
-            ))}
-          </div>
+          <LanguageSection
+            activeLanguage={activeLanguage}
+            onLanguageChange={onLanguageChange}
+          />
         </SettingsSection>
 
         <SettingsSection
@@ -687,140 +632,6 @@ function SettingsPanel({
         </SettingsSection>
       </div>
     </section>
-  );
-}
-
-function PrealertEditor({
-  config,
-  onChange,
-  strings,
-}: {
-  config: PrealertConfig;
-  onChange: (next: PrealertConfig) => void;
-  strings: Strings;
-}) {
-  const sorted = useMemo(() => sortDescending(config.offsets), [config.offsets]);
-
-  function updateOffset(index: number, minutes: number) {
-    if (minutes <= 0) return;
-    if (hasDuplicate(sorted, minutes, index)) return;
-    const nextOffsets = sorted.map((offset, i) =>
-      i === index ? { minutes } : offset,
-    );
-    onChange({ offsets: nextOffsets });
-  }
-
-  function deleteOffset(index: number) {
-    onChange({ offsets: sorted.filter((_, i) => i !== index) });
-  }
-
-  function addOffset() {
-    if (sorted.length >= MAX_PREALERTS) return;
-    onChange({ offsets: [...sorted, nextAvailableOffset(sorted)] });
-  }
-
-  return (
-    <div className="grid gap-2">
-      {sorted.length === 0 ? (
-        <p className="text-xs text-[var(--lin-text-mute)]">
-          {strings.prealerts.emptyState}
-        </p>
-      ) : (
-        sorted.map((offset, index) => (
-          <PrealertRow
-            index={index}
-            key={`${index}-${offset.minutes}`}
-            offset={offset}
-            onDelete={() => deleteOffset(index)}
-            onUpdate={(minutes) => updateOffset(index, minutes)}
-            siblings={sorted}
-            strings={strings}
-          />
-        ))
-      )}
-      {sorted.length < MAX_PREALERTS ? (
-        <button
-          className="w-fit rounded-md border border-dashed border-[var(--lin-border)] px-3 py-1.5 text-xs font-medium text-[var(--lin-text-dim)] transition hover:border-[var(--lin-text-dim)] hover:text-[var(--lin-text)]"
-          onClick={addOffset}
-          type="button"
-        >
-          {strings.prealerts.addButton}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function PrealertRow({
-  index,
-  offset,
-  onDelete,
-  onUpdate,
-  siblings,
-  strings,
-}: {
-  index: number;
-  offset: PrealertOffset;
-  onDelete: () => void;
-  onUpdate: (minutes: number) => void;
-  siblings: PrealertOffset[];
-  strings: Strings;
-}) {
-  const unit = bestUnit(offset.minutes);
-  const value = unitValue(offset.minutes, unit);
-  const candidateForCurrent = toMinutes(value, unit);
-  const isDuplicate =
-    candidateForCurrent !== offset.minutes &&
-    hasDuplicate(siblings, candidateForCurrent, index);
-
-  function handleValueChange(nextValueRaw: string) {
-    const parsed = Number.parseInt(nextValueRaw, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
-    onUpdate(toMinutes(parsed, unit));
-  }
-
-  function handleUnitChange(nextUnit: OffsetUnit) {
-    onUpdate(toMinutes(value, nextUnit));
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        aria-label={strings.prealerts.valueLabel}
-        className={`h-8 w-16 rounded-md border bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)] ${
-          isDuplicate ? "border-[var(--lin-danger)]" : "border-[var(--lin-border)]"
-        }`}
-        inputMode="numeric"
-        min={1}
-        onChange={(event) => handleValueChange(event.target.value)}
-        type="number"
-        value={value}
-      />
-      <select
-        aria-label={strings.prealerts.unitLabel}
-        className="h-8 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-2 text-sm text-[var(--lin-text)] outline-none transition focus:border-[var(--lin-text-dim)]"
-        onChange={(event) => handleUnitChange(event.target.value as OffsetUnit)}
-        value={unit}
-      >
-        <option value="D">{strings.prealerts.units.D}</option>
-        <option value="H">{strings.prealerts.units.H}</option>
-        <option value="M">{strings.prealerts.units.M}</option>
-      </select>
-      <span className="text-xs text-[var(--lin-text-dim)]">
-        {strings.prealerts.suffix}
-      </span>
-      <span className="ml-auto text-xs text-[var(--lin-text-mute)]">
-        {strings.prealerts.describe(offset.minutes)}
-      </span>
-      <button
-        aria-label={strings.prealerts.removeLabel}
-        className="ml-1 rounded-md px-2 py-1 text-xs leading-none text-[var(--lin-text-dim)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)]"
-        onClick={onDelete}
-        type="button"
-      >
-        ✕
-      </button>
-    </div>
   );
 }
 
@@ -848,153 +659,10 @@ function SettingsSection({
   );
 }
 
-function ThemeCard({
-  isActive,
-  onSelect,
-  strings,
-  theme,
-}: {
-  isActive: boolean;
-  onSelect: () => void;
-  strings: Strings;
-  theme: ThemeDefinition;
-}) {
-  const ring = isActive
-    ? "ring-2 ring-[var(--lin-text)]"
-    : "ring-1 ring-[var(--lin-border)] hover:ring-[var(--lin-text-dim)]";
-  const localized = strings.themes[theme.id];
-
-  return (
-    <button
-      aria-pressed={isActive}
-      className={`flex items-center gap-3 rounded-xl bg-[var(--lin-bg-hover)] p-2.5 text-left transition ${ring}`}
-      onClick={onSelect}
-      type="button"
-    >
-      <ThemeSwatchPreview theme={theme} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[var(--lin-text)]">
-          {localized.name}
-        </p>
-        <p className="truncate text-xs text-[var(--lin-text-dim)]">
-          {localized.description}
-        </p>
-      </div>
-    </button>
-  );
-}
-
-function ThemeSwatchPreview({ theme }: { theme: ThemeDefinition }) {
-  return (
-    <div
-      className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-[var(--lin-border)]"
-      style={{ background: theme.swatch.bg }}
-    >
-      <div
-        className="absolute bottom-0 left-0 right-0 h-1/2"
-        style={{ background: theme.swatch.surface }}
-      />
-      <div
-        className="absolute left-1.5 top-1.5 h-1.5 w-4 rounded-full"
-        style={{ background: theme.swatch.text }}
-      />
-    </div>
-  );
-}
-
-function LanguageCard({
-  isActive,
-  language,
-  onSelect,
-}: {
-  isActive: boolean;
-  language: LanguageDefinition;
-  onSelect: () => void;
-}) {
-  const ring = isActive
-    ? "ring-2 ring-[var(--lin-text)]"
-    : "ring-1 ring-[var(--lin-border)] hover:ring-[var(--lin-text-dim)]";
-
-  return (
-    <button
-      aria-pressed={isActive}
-      className={`flex items-center gap-3 rounded-xl bg-[var(--lin-bg-hover)] p-2.5 text-left transition ${ring}`}
-      onClick={onSelect}
-      type="button"
-    >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--lin-border)] bg-[var(--lin-bg)] text-sm font-semibold uppercase text-[var(--lin-text)]">
-        {language.id}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-[var(--lin-text)]">
-          {language.name}
-        </p>
-        <p className="truncate text-xs text-[var(--lin-text-dim)]">
-          {language.sample}
-        </p>
-      </div>
-    </button>
-  );
-}
-
 function parseMode(payload: string): Mode {
   if (payload === "list") return "list";
   if (payload === "settings") return "settings";
   return "capture";
-}
-
-function PreviewLine({
-  isSaving,
-  parseResult,
-  strings,
-}: {
-  isSaving: boolean;
-  parseResult: ReminderParseResult | undefined;
-  strings: Strings;
-}) {
-  if (isSaving) {
-    return <>{strings.preview.saving}</>;
-  }
-  if (!parseResult) {
-    return <>{" "}</>;
-  }
-
-  const base = parseResult.draft.scheduledAt
-    ? formatDateTime(parseResult.draft.scheduledAt)
-    : strings.preview.needsTime;
-
-  const autocorrects = parseResult.issues.filter(isDisplayableAutocorrect);
-
-  if (autocorrects.length === 0) {
-    return <>{base}</>;
-  }
-
-  return (
-    <>
-      <span>{base}</span>
-      <span className="text-[var(--lin-text-mute)]">
-        {" · "}
-        {formatAutocorrects(autocorrects)}
-      </span>
-    </>
-  );
-}
-
-function isDisplayableAutocorrect(issue: ParserIssue): boolean {
-  return (
-    issue.code === "autocorrect" &&
-    typeof issue.original === "string" &&
-    typeof issue.corrected === "string"
-  );
-}
-
-function formatAutocorrects(issues: ParserIssue[]): string {
-  const first = issues[0];
-  const head = `${first.original} → ${first.corrected}`;
-  if (issues.length === 1) {
-    return head;
-  }
-  return `${head} (+${issues.length - 1})`;
 }
 
 async function hideMainWindow(): Promise<void> {
@@ -1058,13 +726,6 @@ function isActionable(reminder: ReminderNode): boolean {
 
 function byScheduledAt(a: ReminderNode, b: ReminderNode): number {
   return a.scheduledAt.localeCompare(b.scheduledAt);
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
 
 function focusCaptureInput(input: HTMLInputElement | null) {

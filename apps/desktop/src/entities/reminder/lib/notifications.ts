@@ -1,3 +1,17 @@
+/**
+ * Reminder notification polling loop.
+ *
+ * Lives in the reminder entity because it composes reminder lifecycle
+ * (auto-done at T-due) with notification dispatch. It reads two feature
+ * configs (prealerts, language) but does not import from features/ —
+ * instead it pulls from the underlying registries and storage helpers in
+ * shared/i18n and feature model files. (Both directions are valid: this
+ * file is one layer up, so importing from `features/*` is allowed.)
+ *
+ * Dedupe lives in localStorage keyed per-reminder, per-stage. The legacy
+ * v1 store (array of "fired due" ids) is migrated on first read.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
@@ -6,8 +20,9 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type { ReminderNode, ReminderStatus } from "@linodea/types";
 
-import { getStoredPrealerts, sortDescending } from "./prealerts";
-import { getStoredLanguage, stringsFor } from "./i18n";
+import { getStoredLanguage } from "@/features/language";
+import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
+import { stringsFor } from "@/shared/i18n";
 
 export const DUE_NOTIFICATION_POLL_INTERVAL_MS = 15_000;
 
@@ -57,9 +72,6 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
  *   - fires any prealert whose window has been crossed and not yet fired,
  *   - fires the T-due toast (once) when due time has passed,
  *   - immediately auto-marks the reminder `done` after the T-due fire.
- *
- * Dedupe lives in localStorage keyed per-reminder, per-stage. The old
- * v1 store (array of "fired due" ids) is migrated on first read.
  */
 export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const permissionGranted = await isPermissionGranted();
