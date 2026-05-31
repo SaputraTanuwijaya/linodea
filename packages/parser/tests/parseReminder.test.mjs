@@ -133,3 +133,72 @@ test("clean input gets zero autocorrect issues (regression guard)", () => {
   const autocorrects = result.issues.filter((i) => i.code === "autocorrect");
   assert.equal(autocorrects.length, 0);
 });
+
+// --- Parser v1.1: fuzzy time markers + conjunctions ---
+
+test("autocorrects an Indonesian evening time marker typo (sorre -> sore)", () => {
+  const result = parseReminderWithNow("besok jam 7 sorre standup", options);
+
+  assert.equal(result.draft.title, "standup");
+  // sore pushes 7 -> 19:00 WIB == 12:00 UTC.
+  assert.equal(result.draft.scheduledAt, "2026-05-23T12:00:00.000Z");
+
+  const autocorrect = result.issues.find(
+    (i) => i.code === "autocorrect" && i.corrected === "sore",
+  );
+  assert.ok(autocorrect, "expected an autocorrect issue for sorre -> sore");
+  assert.equal(autocorrect.original.toLowerCase(), "sorre");
+  assert.equal(autocorrect.distance, 1);
+});
+
+test("autocorrects an Indonesian morning time marker typo (pagy -> pagi)", () => {
+  const result = parseReminderWithNow("besok jam 8 pagy lab session", options);
+
+  assert.equal(result.draft.title, "lab session");
+  // pagi keeps 8 -> 08:00 WIB == 01:00 UTC (same as clean "jam 8" morning).
+  assert.equal(result.draft.scheduledAt, "2026-05-23T01:00:00.000Z");
+  assert.equal(result.draft.category, "university");
+
+  const autocorrect = result.issues.find(
+    (i) => i.code === "autocorrect" && i.corrected === "pagi",
+  );
+  assert.ok(autocorrect, "expected an autocorrect issue for pagy -> pagi");
+});
+
+test("autocorrects a typo'd checklist conjunction (dna -> dan)", () => {
+  const result = parseReminderWithNow(
+    "besok jam 8 lab session bawa laptop dna charger",
+    options,
+  );
+
+  assert.equal(result.draft.title, "lab session");
+  assert.deepEqual(result.draft.checklist, ["laptop", "charger"]);
+
+  const autocorrect = result.issues.find(
+    (i) => i.code === "autocorrect" && i.corrected === "dan",
+  );
+  assert.ok(autocorrect, "expected an autocorrect issue for dna -> dan");
+  assert.equal(autocorrect.original.toLowerCase(), "dna");
+});
+
+test("exact time marker stays clean — no autocorrect (regression guard)", () => {
+  const result = parseReminderWithNow("besok jam 7 sore meeting", options);
+
+  assert.equal(result.draft.title, "meeting");
+  assert.equal(result.draft.scheduledAt, "2026-05-23T12:00:00.000Z");
+
+  const autocorrects = result.issues.filter((i) => i.code === "autocorrect");
+  assert.equal(autocorrects.length, 0);
+});
+
+test("a non-marker word after the time is not aliased onto a marker", () => {
+  const result = parseReminderWithNow("besok jam 8 review slides", options);
+
+  // "review" must not be read as a marker: time stays 08:00 (01:00 UTC),
+  // and the word survives in the title.
+  assert.equal(result.draft.title, "review slides");
+  assert.equal(result.draft.scheduledAt, "2026-05-23T01:00:00.000Z");
+
+  const autocorrects = result.issues.filter((i) => i.code === "autocorrect");
+  assert.equal(autocorrects.length, 0);
+});

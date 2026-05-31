@@ -26,8 +26,6 @@ import { stringsFor } from "@/shared/i18n";
 import { listReminderNodes, updateReminderNodeStatus } from "../api/commands";
 import { isActionable } from "../model/reminder";
 
-export const DUE_NOTIFICATION_POLL_INTERVAL_MS = 15_000;
-
 const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
 const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
 const MAX_STORED_REMINDER_RECORDS = 500;
@@ -39,6 +37,12 @@ export interface DueNotificationResult {
   sentCount: number;
   autoDoneCount: number;
   permissionGranted: boolean;
+  /**
+   * Epoch-ms of the earliest still-unfired prealert or due fire across all
+   * actionable reminders, or `undefined` if nothing is pending. The scheduler
+   * uses this to arm a precise timer instead of coarse polling.
+   */
+  nextFireMs?: number;
 }
 
 interface FireRecord {
@@ -82,6 +86,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const now = Date.now();
   let sentCount = 0;
   let autoDoneCount = 0;
+  let nextFireMs = Infinity;
 
   for (const reminder of actionable) {
     const dueMs = new Date(reminder.scheduledAt).getTime();
@@ -94,12 +99,16 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     // Prealerts -------------------------------------------------------
     for (const offset of sortedOffsets) {
       const fireMs = dueMs - offset.minutes * MS_PER_MINUTE;
-      // Skip prealerts whose fire-time is already past T-due (offset 0)
-      // or that would have fired before the reminder existed.
+      // Skip prealerts whose fire-time is already past T-due (offset 0),
+      // that would have fired before the reminder existed, or already fired.
       if (fireMs >= dueMs) continue;
       if (Number.isFinite(createdMs) && fireMs < createdMs) continue;
-      if (fireMs > now) continue;
       if (record.prealerts?.includes(offset.minutes)) continue;
+      // Not yet time — record it as a candidate for the next precise wake.
+      if (fireMs > now) {
+        nextFireMs = Math.min(nextFireMs, fireMs);
+        continue;
+      }
 
       sendNotification({
         title: "Linodea",
@@ -110,30 +119,35 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     }
 
     // T-due + auto-done ----------------------------------------------
-    if (dueMs <= now && !record.due) {
-      sendNotification({
-        title: "Linodea",
-        body: strings.notificationBody.due(reminder.title, formatScheduledTime(reminder)),
-      });
-      record.due = true;
-      sentCount += 1;
-
-      const nowIso = new Date(now).toISOString();
-      try {
-        await updateReminderNodeStatus({
-          id: reminder.id,
-          status: "done",
-          updatedAt: nowIso,
-          completedAt: nowIso,
+    if (!record.due) {
+      if (dueMs <= now) {
+        sendNotification({
+          title: "Linodea",
+          body: strings.notificationBody.due(reminder.title, formatScheduledTime(reminder)),
         });
-        autoDoneCount += 1;
-      } catch {
-        // Mark-done failed (offline DB, etc.) but the toast already
-        // fired. Keep `record.due = true` so we never re-fire. The
-        // reminder will stay pending in SQLite; next polling pass will
-        // attempt to mark-done again because we re-detect dueMs<=now
-        // but `record.due` blocks re-firing. (Cost: orphan pending row
-        // until manual cleanup or a future repair pass.)
+        record.due = true;
+        sentCount += 1;
+
+        const nowIso = new Date(now).toISOString();
+        try {
+          await updateReminderNodeStatus({
+            id: reminder.id,
+            status: "done",
+            updatedAt: nowIso,
+            completedAt: nowIso,
+          });
+          autoDoneCount += 1;
+        } catch {
+          // Mark-done failed (offline DB, etc.) but the toast already
+          // fired. Keep `record.due = true` so we never re-fire. The
+          // reminder will stay pending in SQLite; the next sync pass will
+          // attempt to mark-done again because we re-detect dueMs<=now
+          // but `record.due` blocks re-firing. (Cost: orphan pending row
+          // until manual cleanup or a future repair pass.)
+        }
+      } else {
+        // Future due time — candidate for the next precise wake.
+        nextFireMs = Math.min(nextFireMs, dueMs);
       }
     }
 
@@ -141,7 +155,12 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   }
 
   writeFireStore(store);
-  return { sentCount, autoDoneCount, permissionGranted };
+  return {
+    sentCount,
+    autoDoneCount,
+    permissionGranted,
+    nextFireMs: Number.isFinite(nextFireMs) ? nextFireMs : undefined,
+  };
 }
 
 function formatScheduledTime(reminder: ReminderNode): string {

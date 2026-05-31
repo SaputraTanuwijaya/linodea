@@ -26,7 +26,6 @@ import type { LanguageId } from "@/features/language";
 import {
   createReminderNode,
   createReminderNodeCommand,
-  notifyDueReminders,
 } from "@/entities/reminder";
 import type { Strings } from "@/shared/i18n";
 import { getDeviceId, isTauriRuntime } from "@/shared/lib";
@@ -84,8 +83,9 @@ export function CapturePage({
     try {
       const reminder = createReminderNode(parsedReminder, getDeviceId());
       await createReminderNodeCommand(reminder);
-      await notifyDueReminders().catch(() => undefined);
       setInput("");
+      // onSaved triggers the scheduler to fire anything immediately due and
+      // arm a precise timer for this new reminder.
       onSaved();
 
       if (shouldHideAfterSave) {

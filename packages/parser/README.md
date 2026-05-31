@@ -74,11 +74,15 @@ The parser falls back to fuzzy matching when an exact regex misses. Uses Damerau
 - Checklist cues (`bring`, `bawa`, `prepare`, `siapin`, `open`, `buka`)
 - Type cues (`before`, `sebelum`, `follow-up`, `tindak lanjut`, `deadline`, `due`, `batas akhir`, `cooldown`)
 
-**What stays exact in v1** (intentional):
+**Added in v1.1** (distance capped at 1 + a positional guard, because these are short, false-match-prone vocabularies):
+- Indonesian time markers (`pagi/siang/sore/malam`) — fuzzy-matched only on the token *directly after* `jam N`, mirroring the exact regex's adjacency. The adjacency guard stops title words like `store` from aliasing onto `sore` mid-sentence. `besok jam 7 sorre` → `sore` → 19:00.
+- Checklist conjunctions (`and`/`dan`) — fuzzy-matched only on *interior* checklist tokens (a real conjunction always sits between two items), so edge items like `pan`/`tan` don't alias onto `dan`. `bawa laptop dna charger` → splits to `["laptop", "charger"]`.
+
+Both still emit an `autocorrect` issue, so the popup surfaces the correction for the user to verify — the residual false-positive risk (e.g. `jam 7 store`, or a genuine interior item within distance 1 of `dan`) is visible, not silent.
+
+**What stays exact** (intentional):
 - `jam`, `am`, `pm`, time units (`m/min/h/hr`) — short and rarely typo'd
-- Indonesian time markers (`pagi/siang/sore/malam`) — needs more refactor in `findClockTime`; deferred to v1.1
-- Conjunctions (`and`, `dan`) — deferred to v1.1
-- Category vocabularies — too many words, higher false-match risk; deferred
+- Category vocabularies — too many words, higher false-match risk; still deferred
 
 **Emitted issues**:
 

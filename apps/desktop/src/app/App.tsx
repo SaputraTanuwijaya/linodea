@@ -25,8 +25,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import "./App.css";
-import { enableReminderNotifications, notifyDueReminders } from "@/entities/reminder";
-import { DUE_NOTIFICATION_POLL_INTERVAL_MS } from "@/entities/reminder";
+import {
+  enableReminderNotifications,
+  startReminderNotificationScheduler,
+  type ReminderNotificationScheduler,
+} from "@/entities/reminder";
 import { useLanguage } from "@/features/language";
 import { usePrealerts } from "@/features/prealerts";
 import { useAutostart } from "@/features/startup";
@@ -51,6 +54,7 @@ type Mode = "capture" | "list" | "settings";
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
 
   const [mode, setMode] = useState<Mode>("capture");
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
@@ -120,24 +124,19 @@ function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
-    let isMounted = true;
-    async function checkDue() {
-      try {
-        await notifyDueReminders();
-      } catch {
-        // Silent.
-      }
-      if (!isMounted) return;
-    }
+    const scheduler = startReminderNotificationScheduler();
+    schedulerRef.current = scheduler;
+    void scheduler.sync();
 
-    void checkDue();
-    const intervalId = window.setInterval(
-      () => void checkDue(),
-      DUE_NOTIFICATION_POLL_INTERVAL_MS,
-    );
+    // Re-sync when the window regains focus: cheap reconciliation after the
+    // machine wakes or the popup is summoned, on top of the precise timer.
+    const onFocus = () => void scheduler.sync();
+    window.addEventListener("focus", onFocus);
+
     return () => {
-      isMounted = false;
-      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      scheduler.stop();
+      schedulerRef.current = null;
     };
   }, []);
 
@@ -232,7 +231,13 @@ function App() {
           inputRef={inputRef}
           language={language}
           onMenuButtonClick={handleMenuButtonClick}
-          onSaved={() => setListRefreshKey((k) => k + 1)}
+          onSaved={() => {
+            setListRefreshKey((k) => k + 1);
+            // Arm a precise timer for the reminder just captured (e.g. an
+            // "in 1m" boiling-water reminder fires on the second, not on the
+            // next coarse backstop tick).
+            void schedulerRef.current?.sync();
+          }}
           shouldHideAfterSave={mode === "capture"}
           strings={strings}
         />

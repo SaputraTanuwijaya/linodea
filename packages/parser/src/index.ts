@@ -8,8 +8,10 @@ import type {
   ReminderType,
 } from "@linodea/types";
 import {
+  CHECKLIST_CONJUNCTIONS,
   CHECKLIST_CUES,
   DATE_WORDS,
+  ID_TIME_MARKERS,
   TYPE_COOLDOWN_WORDS,
   TYPE_DEADLINE_WORDS,
   TYPE_FOLLOWUP_WORDS,
@@ -18,7 +20,17 @@ import {
   type LangTag,
   type VocabularyEntry,
 } from "./vocabularies.js";
-import { findFuzzyTokenMatch } from "./fuzzy.js";
+import { findFuzzyTokenMatch, fuzzyMatch, tokenize } from "./fuzzy.js";
+
+/**
+ * Short-vocabulary fuzzy guard: cap edit distance at 1 regardless of word
+ * length. The default threshold allows distance 2 on words >4 chars, which is
+ * too permissive for short, false-match-prone vocabularies (time markers,
+ * conjunctions) where real words sit within distance 2 of a keyword. Distance
+ * 1 catches the common single-error typos (`pagy→pagi`, `dna→dan`) while
+ * keeping precision high.
+ */
+const distanceOneOnly = () => 1;
 
 export type { LangTag, VocabularyEntry } from "./vocabularies.js";
 
@@ -133,7 +145,7 @@ export function parseReminderWithNow(
 
   const issues: ParserIssue[] = [...dateTime.issues];
   if (typeFinding.issue) issues.push(typeFinding.issue);
-  if (checklistParse.issue) issues.push(checklistParse.issue);
+  issues.push(...checklistParse.issues);
 
   // Autocorrects shouldn't tank confidence as hard as real parse failures.
   // Count them separately at 0.5x weight in the confidence score.
@@ -195,6 +207,7 @@ function parseDateTime(
   const dateMatch = dateFinding?.match;
   const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
   const time = findClockTime(input, dateMatch !== undefined);
+  const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
   const segments = [
     ...(dateMatch ? [dateMatch.segment] : []),
     ...(time ? [time.segment] : []),
@@ -215,7 +228,7 @@ function parseDateTime(
         timezone,
       ),
       segments,
-      issues: dateIssues,
+      issues: [...dateIssues, ...timeIssues],
       hasScheduledAt: true,
       hasDate: true,
       hasTime: true,
@@ -229,6 +242,7 @@ function parseDateTime(
       segments,
       issues: [
         ...dateIssues,
+        ...timeIssues,
         {
           code: "ambiguous_date",
           message: "No date was found; scheduled the next matching clock time.",
@@ -410,7 +424,7 @@ function makeAmbiguousIssue(
 function findClockTime(
   input: string,
   allowBareTime: boolean,
-): { parts: TimeParts; segment: TextSegment } | undefined {
+): { parts: TimeParts; segment: TextSegment; issue?: ParserIssue } | undefined {
   const english = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(input);
   if (english?.index !== undefined) {
     return {
@@ -426,16 +440,30 @@ function findClockTime(
   const indonesian =
     /\bjam\s+(\d{1,2})(?::(\d{2}))?\s*(pagi|siang|sore|malam)?\b/i.exec(input);
   if (indonesian?.index !== undefined) {
+    let marker = indonesian[3]?.toLowerCase();
+    let end = indonesian.index + indonesian[0].length;
+    let issue: ParserIssue | undefined;
+
+    // Exact marker absent — try a fuzzy match on the token directly after the
+    // time (adjacency mirrors the exact regex; we never scan deeper into the
+    // sentence, which would let title words like "store" alias onto "sore").
+    if (!marker) {
+      const trailing = findTrailingMarker(input, end);
+      if (trailing) {
+        marker = trailing.marker;
+        end = trailing.end;
+        issue = trailing.issue;
+      }
+    }
+
     return {
       parts: toIndonesianTime(
         Number(indonesian[1]),
         Number(indonesian[2] ?? 0),
-        indonesian[3]?.toLowerCase(),
+        marker,
       ),
-      segment: {
-        start: indonesian.index,
-        end: indonesian.index + indonesian[0].length,
-      },
+      segment: { start: indonesian.index, end },
+      issue,
     };
   }
 
@@ -451,6 +479,37 @@ function findClockTime(
   return {
     parts: { hour: Number(bare[1]), minute: Number(bare[2]) },
     segment: { start: bare.index, end: bare.index + bare[0].length },
+  };
+}
+
+/**
+ * Fuzzy-match the single token immediately following a `jam N` time against the
+ * Indonesian time markers (`pagi/siang/sore/malam`). Returns the canonical
+ * marker plus the segment end (so the typo'd marker is stripped from the title)
+ * and an autocorrect issue. Distance is capped at 1 for precision — see
+ * `distanceOneOnly`.
+ */
+function findTrailingMarker(
+  input: string,
+  fromIndex: number,
+): { marker: string; end: number; issue: ParserIssue } | undefined {
+  const tail = input.slice(fromIndex);
+  const token = /^\s*(\p{L}+)/u.exec(tail);
+  if (!token) return undefined;
+
+  const word = token[1];
+  const match = fuzzyMatch(word, wordsOf(ID_TIME_MARKERS), {
+    maxDistance: distanceOneOnly,
+  });
+  // Unique, non-exact match only. Exact markers are handled by the regex;
+  // ambiguous ties (matched === null) leave the time unmarked.
+  if (!match || match.matched === null || match.distance === 0) return undefined;
+
+  const start = fromIndex + (token[0].length - word.length);
+  return {
+    marker: match.matched,
+    end: start + word.length,
+    issue: makeAutocorrectIssue(word, match.matched, match.distance, "time marker"),
   };
 }
 
@@ -544,7 +603,7 @@ function findTypeSegments(input: string): TextSegment[] {
 }
 
 interface ChecklistResult extends ChecklistParse {
-  issue?: ParserIssue;
+  issues: ParserIssue[];
 }
 
 function extractChecklist(
@@ -558,16 +617,17 @@ function extractChecklist(
   if (match && match.index !== undefined) {
     const cue = match[1].toLowerCase();
     const rawItems = stripTimingTail(match[2]);
-    const checklist = splitChecklistItems(rawItems, cue);
+    const split = splitChecklistItems(rawItems, cue);
     return {
       titleSource: input.slice(0, match.index),
-      checklist,
+      checklist: split.items,
+      issues: split.issues,
     };
   }
 
   // Fuzzy fallback — catches typos like `brnig laptop`, `bwa laptop`, `prperae slides`.
   const fuzzy = findFuzzyTokenMatch(input, wordsOf(CHECKLIST_CUES));
-  if (!fuzzy) return { titleSource: input, checklist: [] };
+  if (!fuzzy) return { titleSource: input, checklist: [], issues: [] };
 
   if ("ambiguous" in fuzzy) {
     const biased = resolveByLanguage(
@@ -579,16 +639,19 @@ function extractChecklist(
       const cueWord = biased.word.toLowerCase();
       const tail = input.slice(fuzzy.end);
       const rawItems = stripTimingTail(tail.trim());
-      const checklist = splitChecklistItems(rawItems, cueWord);
+      const split = splitChecklistItems(rawItems, cueWord);
       return {
         titleSource: input.slice(0, fuzzy.start),
-        checklist,
-        issue: makeAutocorrectIssue(
-          fuzzy.original,
-          biased.word,
-          fuzzy.ambiguous.distance,
-          "checklist cue",
-        ),
+        checklist: split.items,
+        issues: [
+          makeAutocorrectIssue(
+            fuzzy.original,
+            biased.word,
+            fuzzy.ambiguous.distance,
+            "checklist cue",
+          ),
+          ...split.issues,
+        ],
       };
     }
     // Don't split into a checklist if we can't tell which cue word was meant.
@@ -596,50 +659,106 @@ function extractChecklist(
     return {
       titleSource: input,
       checklist: [],
-      issue: makeAmbiguousIssue(fuzzy.original, fuzzy.ambiguous.candidates, "checklist cue"),
+      issues: [
+        makeAmbiguousIssue(fuzzy.original, fuzzy.ambiguous.candidates, "checklist cue"),
+      ],
     };
   }
 
   const cueWord = fuzzy.result.matched.toLowerCase();
   const tail = input.slice(fuzzy.end);
   const rawItems = stripTimingTail(tail.trim());
-  const checklist = splitChecklistItems(rawItems, cueWord);
+  const split = splitChecklistItems(rawItems, cueWord);
 
   return {
     titleSource: input.slice(0, fuzzy.start),
-    checklist,
-    issue: makeAutocorrectIssue(
-      fuzzy.original,
-      fuzzy.result.matched,
-      fuzzy.result.distance,
-      "checklist cue",
-    ),
+    checklist: split.items,
+    issues: [
+      makeAutocorrectIssue(
+        fuzzy.original,
+        fuzzy.result.matched,
+        fuzzy.result.distance,
+        "checklist cue",
+      ),
+      ...split.issues,
+    ],
   };
 }
 
-function splitChecklistItems(rawItems: string, cue: string): string[] {
-  const cleaned = rawItems
+interface ChecklistSplit {
+  items: string[];
+  issues: ParserIssue[];
+}
+
+function splitChecklistItems(rawItems: string, cue: string): ChecklistSplit {
+  const normalized = rawItems
     .replace(/[.?!]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  if (!cleaned) {
-    return [];
+  if (!normalized) {
+    return { items: [], issues: [] };
   }
 
+  // Normalize typo'd conjunctions (`dna`/`ane`) to a canonical `and` so the
+  // splitter below catches them. Emits an autocorrect issue per fix.
+  const conj = normalizeFuzzyConjunctions(normalized);
+  const cleaned = conj.text;
+  const issues = conj.issues;
+
   if (/[,+]/.test(cleaned) || /\b(and|dan)\b/i.test(cleaned)) {
-    return cleaned
+    const items = cleaned
       .split(/\s*(?:,|\+|\band\b|\bdan\b)\s*/i)
       .map(cleanChecklistItem)
       .filter(Boolean);
+    return { items, issues };
   }
 
   if (["bring", "bawa", "prepare", "siapin"].includes(cue)) {
     const words = cleaned.split(" ").map(cleanChecklistItem).filter(Boolean);
-    return words.length <= 5 ? words : [cleaned];
+    return { items: words.length <= 5 ? words : [cleaned], issues };
   }
 
-  return [cleaned];
+  return { items: [cleaned], issues };
+}
+
+/**
+ * Replace typo'd conjunction tokens (`dna`→`dan`, `ane`→`and`) with a canonical
+ * `and` so the item splitter treats them as separators. Two precision guards:
+ *  - interior tokens only — a real conjunction always sits between two items,
+ *    so first/last tokens are never split points (and `pan`/`tan`-style items
+ *    at the edges don't alias onto `dan`);
+ *  - distance capped at 1 — these are 3-char words with many near neighbors.
+ * Exact conjunctions are left untouched (the splitter already handles them).
+ */
+function normalizeFuzzyConjunctions(text: string): {
+  text: string;
+  issues: ParserIssue[];
+} {
+  const tokens = tokenize(text);
+  if (tokens.length < 3) return { text, issues: [] };
+
+  const issues: ParserIssue[] = [];
+  const hits: Array<{ start: number; end: number }> = [];
+
+  for (let k = 1; k < tokens.length - 1; k++) {
+    const token = tokens[k];
+    const match = fuzzyMatch(token.word, wordsOf(CHECKLIST_CONJUNCTIONS), {
+      maxDistance: distanceOneOnly,
+    });
+    if (!match || match.matched === null || match.distance === 0) continue;
+    hits.push({ start: token.start, end: token.end });
+    issues.push(
+      makeAutocorrectIssue(token.word, match.matched, match.distance, "conjunction"),
+    );
+  }
+
+  let out = text;
+  for (const hit of hits.sort((a, b) => b.start - a.start)) {
+    out = `${out.slice(0, hit.start)}and${out.slice(hit.end)}`;
+  }
+
+  return { text: out, issues };
 }
 
 function stripTimingTail(input: string): string {
