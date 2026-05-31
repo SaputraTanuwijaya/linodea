@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   byScheduledAt,
+  clearReminderFireRecord,
   deleteReminderNode,
   isActionable,
   listReminderNodes,
@@ -110,6 +111,8 @@ export function ListPage({
   }
 
   function handleSnooze(reminder: ReminderNode, snoozedUntil: string) {
+    // Clear the fire dedupe so an already-fired reminder re-fires at the new time.
+    clearReminderFireRecord(reminder.id);
     void runMutation(reminder.id, () =>
       updateReminderNodeStatus({
         id: reminder.id,

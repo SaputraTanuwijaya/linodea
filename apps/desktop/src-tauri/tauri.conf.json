@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Linodea",
         "width": 620,
         "height": 130,
@@ -26,6 +27,20 @@
         "center": true,
         "visible": false,
         "focus": true
+      },
+      {
+        "label": "alert",
+        "title": "Linodea Alert",
+        "width": 360,
+        "height": 120,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {

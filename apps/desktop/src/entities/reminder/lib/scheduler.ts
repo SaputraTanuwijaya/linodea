@@ -8,14 +8,17 @@
  *      instant) and arms a single `setTimeout` for exactly that moment.
  *
  * When that timer fires, it re-syncs: the now-due item fires and the next
- * instant is re-armed. The result is second-level accuracy while the app is
- * running (and with Startup v0 launching Linodea into the tray on boot, that
- * is effectively always) without busy-polling.
+ * instant is re-armed. When the window is focused, this gives second-level
+ * accuracy without busy-polling.
  *
- * A coarse backstop interval still runs as a safety net — `setTimeout` can be
- * delayed or dropped across system sleep/wake, and external changes (a Done
- * from another surface) should eventually be reconciled. It is far less
- * frequent than the old poll because the precise timer carries the accuracy.
+ * The backstop interval is NOT just a sleep/wake safety net — it's the
+ * reliability floor. WebView2/Chromium throttles (and can effectively suspend)
+ * `setTimeout` in a HIDDEN window, so a far-out precise timer can't be trusted
+ * to fire on time while the popup is hidden. A short, dumb interval still fires
+ * reliably (interval throttling enforces a minimum cadence, not suspension) —
+ * which is exactly how the pre-S28 15s poll delivered toasts while hidden. We
+ * keep that 15s floor so worst-case latency matches the old proven behavior;
+ * the precise timer is a foreground accuracy bonus on top, not the sole path.
  *
  * Not in scope here (deliberately deferred — see S28 notes / notification
  * strategy doc): native OS-level scheduling (Windows `ToastNotificationManager`
@@ -26,9 +29,9 @@
 
 import { notifyDueReminders, type DueNotificationResult } from "./notifications";
 
-/** Safety re-sync cadence. The precise timer carries accuracy; this only
- * catches sleep/wake drift, dropped timers, and external state changes. */
-const BACKSTOP_INTERVAL_MS = 60_000;
+/** Reliability floor. Matches the proven pre-S28 poll cadence so a throttled /
+ * suspended precise timer in a hidden window can't delay a toast beyond ~15s. */
+const BACKSTOP_INTERVAL_MS = 15_000;
 
 /** `setTimeout` clamps delays above ~2^31-1 ms to fire immediately. Cap armed
  * delays well under that; a far-future fire just re-arms when the cap elapses. */
@@ -80,6 +83,10 @@ export function startReminderNotificationScheduler(): ReminderNotificationSchedu
       const result = await notifyDueReminders();
       if (!stopped) arm(result.nextFireMs);
       return result;
+    } catch {
+      // A transient failure (DB lock, permission race) must not kill the loop.
+      // The backstop interval retries on its next tick.
+      return undefined;
     } finally {
       running = false;
       if (rerunRequested && !stopped) {

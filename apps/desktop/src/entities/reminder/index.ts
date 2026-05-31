@@ -17,6 +17,7 @@ export {
   isActionable,
 } from "./model/reminder";
 export {
+  clearReminderFireRecord,
   enableReminderNotifications,
   getNotificationPermissionState,
   notifyDueReminders,

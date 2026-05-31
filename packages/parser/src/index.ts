@@ -110,6 +110,18 @@ export function normalizeReminderInput(input: string): string {
   return input.trim().replace(/\s+/g, " ");
 }
 
+/**
+ * Opt-in exact-second timing keyword. By default relative reminders snap to the
+ * minute (:00); `/countdown` keeps the exact instant (typed at :47 → fires at
+ * :47). Detected case-insensitively as a standalone token and stripped from the
+ * text so it never lands in the title or checklist.
+ */
+const COUNTDOWN_PATTERN = /(?:^|\s)\/countdown(?=\s|$)/i;
+
+function roundToMinute(ms: number): number {
+  return Math.round(ms / 60_000) * 60_000;
+}
+
 export function parseReminder(
   rawInput: string,
   options: ParseReminderOptions = {},
@@ -125,7 +137,13 @@ export function parseReminderWithNow(
   rawInput: string,
   options: Required<ParseReminderOptions>,
 ): ReminderParseResult {
-  const normalizedInput = normalizeReminderInput(rawInput);
+  const rawNormalized = normalizeReminderInput(rawInput);
+  // Pull the `/countdown` keyword out before any other parsing so it can't
+  // pollute the title; remember it to skip minute-snapping below.
+  const countdown = COUNTDOWN_PATTERN.test(rawNormalized);
+  const normalizedInput = countdown
+    ? normalizeReminderInput(rawNormalized.replace(COUNTDOWN_PATTERN, " "))
+    : rawNormalized;
   const now = coerceDate(options.now);
   const parsedAt = now.toISOString();
   const dateTime = parseDateTime(
@@ -133,6 +151,7 @@ export function parseReminderWithNow(
     now,
     options.timezone,
     options.preferredLanguage,
+    countdown,
   );
   const typeFinding = detectReminderType(normalizedInput, options.preferredLanguage);
   const typeSegments = findTypeSegments(normalizedInput);
@@ -190,11 +209,16 @@ function parseDateTime(
   now: Date,
   timezone: IanaTimezone,
   preferredLanguage: PreferredLanguage,
+  countdown: boolean,
 ): DateTimeParse {
   const relative = findRelativeTime(input);
   if (relative) {
+    // Default: snap to the nearest minute (:00) so firing is clean and
+    // predictable. `/countdown` keeps the exact instant for precise timers.
+    const target = now.getTime() + relative.minutes * 60_000;
+    const scheduledMs = countdown ? target : roundToMinute(target);
     return {
-      scheduledAt: new Date(now.getTime() + relative.minutes * 60_000).toISOString(),
+      scheduledAt: new Date(scheduledMs).toISOString(),
       segments: [relative.segment],
       issues: [],
       hasScheduledAt: true,

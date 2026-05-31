@@ -141,6 +141,16 @@ fn set_popup_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_alert(app: tauri::AppHandle, payload: desktop::AlertPayload) -> Result<(), String> {
+    desktop::show_alert(&app, payload).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn dismiss_alert(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::hide_alert(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -177,6 +187,8 @@ pub fn run() {
             enter_list_mode,
             enter_settings_mode,
             set_popup_height,
+            show_alert,
+            dismiss_alert,
             quit_app
         ])
         .run(tauri::generate_context!())

@@ -202,3 +202,36 @@ test("a non-marker word after the time is not aliased onto a marker", () => {
   const autocorrects = result.issues.filter((i) => i.code === "autocorrect");
   assert.equal(autocorrects.length, 0);
 });
+
+// --- Fire-time alignment + /countdown ---
+
+// `now` carries non-zero seconds so snapping is observable.
+const secondsNow = {
+  now: "2026-05-22T01:00:47+07:00", // == 2026-05-21T18:00:47Z
+  timezone: "Asia/Jakarta",
+};
+
+test("relative reminders snap to the minute by default", () => {
+  const result = parseReminderWithNow("in 2m standup", secondsNow);
+
+  // 18:00:47Z + 2m = 18:02:47Z, rounded to nearest minute -> 18:03:00Z.
+  assert.equal(result.draft.title, "standup");
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:03:00.000Z");
+});
+
+test("/countdown keeps the exact second and is stripped from the title", () => {
+  const result = parseReminderWithNow("in 2m standup /countdown", secondsNow);
+
+  // Exact instant preserved: 18:00:47Z + 2m = 18:02:47Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:02:47.000Z");
+  // Keyword must not pollute the title or checklist.
+  assert.equal(result.draft.title, "standup");
+  assert.ok(!/countdown/i.test(result.draft.title));
+});
+
+test("/countdown works regardless of position in the input", () => {
+  const result = parseReminderWithNow("/countdown in 2m boil egg", secondsNow);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:02:47.000Z");
+  assert.equal(result.draft.title, "boil egg");
+});

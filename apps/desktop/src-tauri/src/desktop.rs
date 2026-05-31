@@ -1,10 +1,17 @@
+use serde::{Deserialize, Serialize};
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WindowEvent,
+    App, AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow, WindowEvent,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
+const ALERT_WINDOW_LABEL: &str = "alert";
+const NOTIFY_EVENT: &str = "linodea:notify";
+const ALERT_SIZE: (f64, f64) = (360.0, 120.0);
+/// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
+const ALERT_MARGIN: f64 = 16.0;
+const ALERT_BOTTOM_SLACK: f64 = 48.0;
 const TRAY_MENU_CAPTURE: &str = "show_capture";
 const TRAY_MENU_REMINDERS: &str = "show_reminders";
 const TRAY_MENU_SETTINGS: &str = "show_settings";
@@ -44,6 +51,53 @@ pub fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
 
 pub fn hide_main_window(app: &AppHandle) -> tauri::Result<()> {
     main_window(app)?.hide()
+}
+
+/// Data for the custom Linodea alert window. The alert webview formats the
+/// human text from this via i18n, so we pass structured fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertPayload {
+    pub reminder_id: String,
+    pub title: String,
+    pub kind: String,
+    pub lead_minutes: Option<u32>,
+    pub when_ms: i64,
+}
+
+/// Show the custom alert window bottom-right, carrying `payload`. Deliberately
+/// never focuses the window — it grabs attention without stealing input.
+pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
+    let window = alert_window(app)?;
+    let _ = position_alert_bottom_right(&window);
+    let _ = app.emit_to(ALERT_WINDOW_LABEL, NOTIFY_EVENT, payload);
+    window.show()?;
+    let _ = window.set_always_on_top(true);
+    Ok(())
+}
+
+pub fn hide_alert(app: &AppHandle) -> tauri::Result<()> {
+    alert_window(app)?.hide()
+}
+
+fn alert_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    app.get_webview_window(ALERT_WINDOW_LABEL)
+        .ok_or(tauri::Error::WindowNotFound)
+}
+
+fn position_alert_bottom_right(window: &WebviewWindow) -> tauri::Result<()> {
+    let Some(monitor) = window.current_monitor()? else {
+        return Ok(());
+    };
+    let scale = monitor.scale_factor();
+    let m_pos = monitor.position();
+    let m_size = monitor.size();
+    let win_w = (ALERT_SIZE.0 + ALERT_MARGIN) * scale;
+    let win_h = (ALERT_SIZE.1 + ALERT_MARGIN + ALERT_BOTTOM_SLACK) * scale;
+    let x = m_pos.x as f64 + m_size.width as f64 - win_w;
+    let y = m_pos.y as f64 + m_size.height as f64 - win_h;
+    window.set_position(PhysicalPosition::new(x, y))?;
+    Ok(())
 }
 
 fn show_in_mode(app: &AppHandle, size: (f64, f64), mode: &str) -> tauri::Result<()> {

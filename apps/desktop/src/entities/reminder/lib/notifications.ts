@@ -12,19 +12,28 @@
  * v1 store (array of "fired due" ids) is migrated on first read.
  */
 
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
+import { invoke } from "@tauri-apps/api/core";
 import type { ReminderNode } from "@linodea/types";
 
-import { getStoredLanguage } from "@/features/language";
 import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
-import { stringsFor } from "@/shared/i18n";
 
 import { listReminderNodes, updateReminderNodeStatus } from "../api/commands";
 import { isActionable } from "../model/reminder";
+
+/** Payload for the custom Linodea alert window (`show_alert` Rust command).
+ * The alert webview formats the text via i18n, so we pass structured data. */
+interface AlertPayload {
+  reminderId: string;
+  title: string;
+  kind: "due" | "prealert";
+  leadMinutes?: number;
+  whenMs: number;
+}
+
+function showAlert(payload: AlertPayload): void {
+  void invoke("show_alert", { payload }).catch(() => undefined);
+}
 
 const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
 const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
@@ -73,15 +82,14 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
  *   - immediately auto-marks the reminder `done` after the T-due fire.
  */
 export async function notifyDueReminders(): Promise<DueNotificationResult> {
-  const permissionGranted = await isPermissionGranted();
-  if (!permissionGranted) {
-    return { sentCount: 0, autoDoneCount: 0, permissionGranted };
-  }
+  // The custom Linodea alert window does not depend on OS notification
+  // permission (that gate is only relevant to the deferred app-off OS-toast
+  // fallback), so we never block firing on it.
+  const permissionGranted = await isPermissionGranted().catch(() => false);
 
   const reminders = await listReminderNodes();
   const actionable = reminders.filter(isActionable);
   const sortedOffsets = sortDescending(getStoredPrealerts().offsets);
-  const strings = stringsFor(getStoredLanguage());
   const store = readFireStore();
   const now = Date.now();
   let sentCount = 0;
@@ -110,9 +118,12 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
         continue;
       }
 
-      sendNotification({
-        title: "Linodea",
-        body: strings.notificationBody.prealert(reminder.title, offset.minutes),
+      showAlert({
+        reminderId: reminder.id,
+        title: reminder.title,
+        kind: "prealert",
+        leadMinutes: offset.minutes,
+        whenMs: fireMs,
       });
       record.prealerts = [...(record.prealerts ?? []), offset.minutes];
       sentCount += 1;
@@ -121,9 +132,11 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     // T-due + auto-done ----------------------------------------------
     if (!record.due) {
       if (dueMs <= now) {
-        sendNotification({
-          title: "Linodea",
-          body: strings.notificationBody.due(reminder.title, formatScheduledTime(reminder)),
+        showAlert({
+          reminderId: reminder.id,
+          title: reminder.title,
+          kind: "due",
+          whenMs: dueMs,
         });
         record.due = true;
         sentCount += 1;
@@ -176,11 +189,17 @@ function effectiveDueMs(reminder: ReminderNode): number {
   return new Date(reminder.scheduledAt).getTime();
 }
 
-function formatScheduledTime(reminder: ReminderNode): string {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(effectiveDueMs(reminder)));
+/**
+ * Forget a reminder's fire record so it can fire again. Used when a reminder is
+ * snoozed after it already fired (its `due`/prealert dedupe would otherwise
+ * block the re-fire at the new time). Safe to call for never-fired reminders.
+ */
+export function clearReminderFireRecord(id: string): void {
+  const store = readFireStore();
+  if (store[id]) {
+    delete store[id];
+    writeFireStore(store);
+  }
 }
 
 function readFireStore(): FireStore {

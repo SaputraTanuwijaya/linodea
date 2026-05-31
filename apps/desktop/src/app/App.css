@@ -40,9 +40,12 @@ body,
 
 :root,
 [data-theme="dark"] {
-  --lin-bg: rgb(24 24 27 / 0.95);
-  --lin-bg-hover: rgb(39 39 42 / 0.85);
-  --lin-border: rgb(63 63 70 / 0.6);
+  /* Opaque surfaces — no glassmorphism. Reading text through a translucent,
+     blurred panel was a nuisance; the popup floats on the transparent window,
+     but the panel itself is solid. */
+  --lin-bg: rgb(24 24 27);
+  --lin-bg-hover: rgb(39 39 42);
+  --lin-border: rgb(63 63 70);
   --lin-text: rgb(244 244 245);
   --lin-text-dim: rgb(113 113 122);
   --lin-text-mute: rgb(82 82 91);
