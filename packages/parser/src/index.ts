@@ -225,9 +225,11 @@ function parseDateTime(
   const relative = findRelativeTime(input);
   if (relative) {
     // Default: snap to the nearest minute (:00) so firing is clean and
-    // predictable. `/countdown` keeps the exact instant for precise timers.
-    const target = now.getTime() + relative.minutes * 60_000;
-    const scheduledMs = countdown ? target : roundToMinute(target);
+    // predictable. `/countdown` keeps the exact instant for precise timers, and
+    // sub-minute durations always keep it too (snapping 30s to :00 is nonsense).
+    const target = now.getTime() + relative.ms;
+    const keepExact = countdown || relative.ms < 60_000;
+    const scheduledMs = keepExact ? target : roundToMinute(target);
     return {
       scheduledAt: new Date(scheduledMs).toISOString(),
       segments: [relative.segment],
@@ -241,7 +243,7 @@ function parseDateTime(
   const dateFinding = findDateOffset(input, preferredLanguage);
   const dateMatch = dateFinding?.match;
   const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
-  const time = findClockTime(input, dateMatch !== undefined);
+  const time = findClockTime(input);
   const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
   const segments = [
     ...(dateMatch ? [dateMatch.segment] : []),
@@ -320,27 +322,37 @@ function parseDateTime(
   };
 }
 
+/**
+ * Relative-duration units (EN + ID), longest spelling first so the alternation
+ * prefers `minutes` over a bare `m`, etc. The trailing `\b` in the pattern is
+ * the false-positive guard: `run 5 miles` / `buy 2 apples` don't match because
+ * the unit token isn't followed by a word boundary.
+ */
+const RELATIVE_UNITS =
+  "seconds|second|secs|sec|detik|dtk|s|minutes|minute|mins|min|menit|m|hours|hour|hrs|hr|jam|h|days|day|hari|d";
+
+/**
+ * Match a relative duration. The `in` prefix (EN) and `lagi` suffix (ID) are
+ * both optional, so `in 2 minutes`, `2 minutes lagi`, `5m`, `30 detik`, and
+ * `in 3 days` all parse. Returns the duration in milliseconds so sub-minute
+ * values (seconds) survive.
+ */
 function findRelativeTime(input: string):
-  | { minutes: number; segment: TextSegment }
+  | { ms: number; segment: TextSegment }
   | undefined {
-  const patterns = [
-    /\bin\s+(\d{1,3})\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b/i,
-    /\b(\d{1,3})\s*(m|min|menit|h|jam)\s+lagi\b/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(input);
-    if (!match || match.index === undefined) {
-      continue;
-    }
-
-    return {
-      minutes: toMinutes(Number(match[1]), match[2]),
-      segment: { start: match.index, end: match.index + match[0].length },
-    };
+  const pattern = new RegExp(
+    `\\b(?:in\\s+)?(\\d{1,3})\\s*(${RELATIVE_UNITS})\\b(?:\\s+lagi)?`,
+    "i",
+  );
+  const match = pattern.exec(input);
+  if (!match || match.index === undefined) {
+    return undefined;
   }
 
-  return undefined;
+  return {
+    ms: relativeUnitToMs(Number(match[1]), match[2]),
+    segment: { start: match.index, end: match.index + match[0].length },
+  };
 }
 
 /**
@@ -458,7 +470,6 @@ function makeAmbiguousIssue(
 
 function findClockTime(
   input: string,
-  allowBareTime: boolean,
 ): { parts: TimeParts; segment: TextSegment; issue?: ParserIssue } | undefined {
   const english = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(input);
   if (english?.index !== undefined) {
@@ -502,10 +513,9 @@ function findClockTime(
     };
   }
 
-  if (!allowBareTime) {
-    return undefined;
-  }
-
+  // Bare 24-hour time (`19:00`) — recognized with or without a date word. The
+  // pattern is strict (`16:9`, `2:5`, `16:90` don't match), so the false-match
+  // risk is low. Time-only resolves to today, or tomorrow if already past.
   const bare = /\b([01]?\d|2[0-3]):([0-5]\d)\b/.exec(input);
   if (!bare || bare.index === undefined) {
     return undefined;
@@ -892,8 +902,13 @@ function removeSegments(input: string, segments: TextSegment[]): string {
   return output.replace(/\s+/g, " ").trim();
 }
 
-function toMinutes(amount: number, unit: string): number {
-  return /^(h|hr|hrs|hour|hours|jam)$/i.test(unit) ? amount * 60 : amount;
+function relativeUnitToMs(amount: number, unit: string): number {
+  const u = unit.toLowerCase();
+  if (/^(seconds|second|secs|sec|detik|dtk|s)$/.test(u)) return amount * 1_000;
+  if (/^(hours|hour|hrs|hr|jam|h)$/.test(u)) return amount * 3_600_000;
+  if (/^(days|day|hari|d)$/.test(u)) return amount * 86_400_000;
+  // minutes (minutes|minute|mins|min|menit|m) and any fallthrough.
+  return amount * 60_000;
 }
 
 function toTwelveHourTime(hour: number, minute: number, meridiem: string): TimeParts {

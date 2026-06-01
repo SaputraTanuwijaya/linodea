@@ -23,9 +23,9 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 
 ### Relative time
 
-- `in 30m`, `in 2h`
-- `30m lagi`, `2 jam lagi`
-- Relative reminders **snap to the nearest minute (`:00`)** by default, so firing is clean and predictable. Add the keyword **`/countdown`** anywhere in the input to keep the exact second instead (typed at `:47` → fires at `:47`); the keyword is stripped from the title. Clock/date times already resolve to `:00`. The bare command name is exported as `COUNTDOWN_COMMAND_NAME` (single source of truth shared with the desktop slash-command registry), and `parseReminder` surfaces a `countdown: boolean` on its result so the UI can show the on-screen countdown timer.
+- Units: **seconds** (`s`, `sec`, `detik`, `dtk`), **minutes** (`m`, `min`, `menit`), **hours** (`h`, `hr`, `jam`), **days** (`d`, `day`, `hari`).
+- The `in` prefix (EN) and `lagi` suffix (ID) are **optional**: `in 30m`, `5m`, `2 minutes`, `30 detik`, `2 jam lagi`, `in 3 days` all parse. A trailing word boundary after the unit guards against false matches (`run 5 miles`, `buy 2 apples` don't match).
+- Relative reminders **snap to the nearest minute (`:00`)** by default, so firing is clean and predictable. Add the keyword **`/countdown`** anywhere in the input to keep the exact second instead (typed at `:47` → fires at `:47`); the keyword is stripped from the title. **Sub-minute durations always keep exact seconds** (snapping a 30s reminder to `:00` would be nonsense). The bare command name is exported as `COUNTDOWN_COMMAND_NAME` (single source of truth shared with the desktop slash-command registry), and `parseReminder` surfaces a `countdown: boolean` on its result so the UI can show the on-screen countdown timer.
 
 ### Date words
 
@@ -37,7 +37,7 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 
 - `8am`, `8:30pm`
 - `jam 7 pagi`, `jam 19`
-- Bare `14:00` only when a date word is also present.
+- Bare 24-hour `19:00` — recognized with or without a date word. Time-only resolves to **today** if the time is still ahead, otherwise **tomorrow** (you can't schedule into the past). The pattern is strict (`16:9`, `2:5`, `16:90` don't match); separator is `:` only.
 
 ### Checklist cues
 

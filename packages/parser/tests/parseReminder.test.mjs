@@ -240,3 +240,93 @@ test("/countdown works regardless of position in the input", () => {
   assert.equal(result.draft.title, "boil egg");
   assert.equal(result.countdown, true);
 });
+
+// --- Parser flexibility (S35): seconds, bare relative, days, bare 24h time ---
+
+// Evening `now` (20:00 Jakarta) so a 19:00 reminder has already passed today.
+const eveningNow = {
+  now: "2026-05-22T20:00:00+07:00", // == 2026-05-22T13:00:00Z
+  timezone: "Asia/Jakarta",
+};
+
+test("seconds parse and keep exact timing without /countdown", () => {
+  const result = parseReminderWithNow("30 seconds boil water", secondsNow);
+
+  // Sub-minute -> exact instant kept (no minute snapping): 18:00:47Z + 30s.
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:01:17.000Z");
+  assert.equal(result.draft.title, "boil water");
+  assert.ok(!result.countdown);
+});
+
+test("/countdown with seconds keeps the exact instant", () => {
+  const result = parseReminderWithNow("/countdown 30 seconds boil water", secondsNow);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:01:17.000Z");
+  assert.equal(result.draft.title, "boil water");
+  assert.equal(result.countdown, true);
+});
+
+test("bare relative minutes parse without 'in'", () => {
+  const result = parseReminderWithNow("5m standup", options);
+
+  // >= 1 min -> snapped to the minute (18:00:00Z + 5m).
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:05:00.000Z");
+  assert.equal(result.draft.title, "standup");
+});
+
+test("bare relative minutes (spelled out) parse without 'in'", () => {
+  const result = parseReminderWithNow("2 minutes call mom", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:02:00.000Z");
+  assert.equal(result.draft.title, "call mom");
+});
+
+test("mixed 'in' + Indonesian unit parses", () => {
+  const result = parseReminderWithNow("in 90 menit makan", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T19:30:00.000Z");
+  assert.equal(result.draft.title, "makan");
+});
+
+test("relative days parse", () => {
+  const result = parseReminderWithNow("in 3 days submit report", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-24T18:00:00.000Z");
+  assert.equal(result.draft.title, "submit report");
+});
+
+test("bare 24-hour time resolves to today when still ahead", () => {
+  const result = parseReminderWithNow("19:00 do this", options);
+
+  // now is 01:00 Jakarta (May 22) -> 19:00 today == 12:00:00Z May 22.
+  assert.equal(result.draft.scheduledAt, "2026-05-22T12:00:00.000Z");
+  assert.equal(result.draft.title, "do this");
+});
+
+test("bare 24-hour time rolls to tomorrow when already past", () => {
+  const result = parseReminderWithNow("19:00 do this", eveningNow);
+
+  // now is 20:00 Jakarta (May 22) -> next 19:00 is May 23 == 12:00:00Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-23T12:00:00.000Z");
+});
+
+test("date word + bare 24-hour time still works", () => {
+  const result = parseReminderWithNow("besok 19:00 standup", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-23T12:00:00.000Z");
+  assert.equal(result.draft.title, "standup");
+});
+
+// Negatives — prove no false positives from number+word or colon-looking text.
+for (const phrase of [
+  "buy 2 apples",
+  "run 5 miles",
+  "read 3 pages",
+  "watched 16:9 clip",
+  "call 2:5 person",
+]) {
+  test(`no spurious time from "${phrase}"`, () => {
+    const result = parseReminderWithNow(phrase, options);
+    assert.equal(result.draft.scheduledAt, undefined);
+  });
+}
