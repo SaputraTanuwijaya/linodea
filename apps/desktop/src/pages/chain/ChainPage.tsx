@@ -1,5 +1,5 @@
 /**
- * The chain view mode — a read-only, category-grouped tree of reminder chains.
+ * The chain view mode — a category-grouped tree of reminder chains.
  *
  * Reads the assembled forest from `list_reminder_chains` (Rust owns ordering +
  * integrity). Roots are bucketed under category section headers (category is
@@ -8,13 +8,17 @@
  * with a curved elbow (git's color + consistency, YouTube's shape). Done /
  * cancelled nodes are dimmed but kept, so the tree never loses its shape.
  *
- * Read-only for now — lifecycle actions and link/unlink/reorder move in once
- * this view replaces the flat list.
+ * The ONLY interaction is the manual category-correction escape hatch: click a
+ * node's category dot to recategorize it (parser's guess is just a default).
+ * Optional and non-destructive — reminders work fine uncategorized; this is for
+ * the rare miss, not a management chore. Deliberately NOT a workspace: no
+ * link/reorder/arrange (that would make it a calendar).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { listReminderChains } from "@/entities/reminder";
+import { listReminderChains, setReminderCategory } from "@/entities/reminder";
 import { categoryColor } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import { formatDateTime, isTauriRuntime } from "@/shared/lib";
@@ -28,11 +32,18 @@ import {
 const ROW_H = 40;
 const BASE_X = 12;
 const INDENT = 26;
+const CATEGORY_MENU_HEIGHT = 268;
 
 interface FlatRow {
   node: ReminderNode;
   depth: number;
   parentIndex: number | null;
+}
+
+interface CategoryMenuState {
+  id: string;
+  x: number;
+  y: number;
 }
 
 /** Depth-first flatten of a category's roots into rows, tracking each row's
@@ -66,6 +77,8 @@ export function ChainPage({
 }) {
   const [chains, setChains] = useState<ChainNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [categoryMenu, setCategoryMenu] = useState<CategoryMenuState | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -83,10 +96,53 @@ export function ChainPage({
     void refresh();
   }, [refresh, refreshKey]);
 
+  // Close the category menu on outside click / Escape.
+  useEffect(() => {
+    if (!categoryMenu) return;
+    function onMouseDown(event: globalThis.MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setCategoryMenu(null);
+      }
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setCategoryMenu(null);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [categoryMenu]);
+
+  function openCategoryMenu(id: string, event: ReactMouseEvent) {
+    event.stopPropagation();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setCategoryMenu({ id, x: rect.left, y: rect.bottom + 4 });
+  }
+
+  async function pickCategory(category: ReminderCategory) {
+    if (!categoryMenu) return;
+    const id = categoryMenu.id;
+    setCategoryMenu(null);
+    try {
+      await setReminderCategory({ id, category, updatedAt: new Date().toISOString() });
+      await refresh();
+    } catch {
+      // Silent.
+    }
+  }
+
   const sections = REMINDER_CATEGORIES.map((category) => ({
     category,
     roots: chains.filter((chain) => chain.node.category === category),
   })).filter((section) => section.roots.length > 0);
+
+  // Flip the menu above the anchor when it would overflow the window bottom.
+  const menuTop =
+    categoryMenu && categoryMenu.y + CATEGORY_MENU_HEIGHT > window.innerHeight
+      ? Math.max(4, categoryMenu.y - CATEGORY_MENU_HEIGHT - 8)
+      : categoryMenu?.y;
 
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
@@ -109,22 +165,48 @@ export function ChainPage({
             <CategoryChains
               category={category}
               key={category}
+              onDotClick={openCategoryMenu}
               roots={roots}
               strings={strings}
             />
           ))}
         </div>
       )}
+
+      {categoryMenu ? (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
+          ref={menuRef}
+          style={{ left: categoryMenu.x, top: menuTop }}
+        >
+          {REMINDER_CATEGORIES.map((category) => (
+            <button
+              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+              key={category}
+              onClick={() => void pickCategory(category)}
+              type="button"
+            >
+              <span
+                className="h-2.5 w-2.5 flex-none rounded-full"
+                style={{ background: categoryColor(category) }}
+              />
+              {strings.category[category]}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function CategoryChains({
   category,
+  onDotClick,
   roots,
   strings,
 }: {
   category: ReminderCategory;
+  onDotClick: (id: string, event: ReactMouseEvent) => void;
   roots: ChainNode[];
   strings: Strings;
 }) {
@@ -180,8 +262,10 @@ function CategoryChains({
               key={row.node.id}
               style={{ height: ROW_H, zIndex: 1, paddingLeft: row.depth * INDENT }}
             >
-              <span
-                className="flex-none rounded-full"
+              <button
+                aria-label={strings.chain.setCategory}
+                className="flex-none cursor-pointer rounded-full"
+                onClick={(event) => onDotClick(row.node.id, event)}
                 style={{
                   width: 12,
                   height: 12,
@@ -189,6 +273,8 @@ function CategoryChains({
                   background: categoryColor(row.node.category),
                   boxShadow: "0 0 0 3px var(--lin-bg)",
                 }}
+                title={strings.chain.setCategory}
+                type="button"
               />
               <span
                 className={`ml-2.5 min-w-0 flex-1 truncate text-sm ${

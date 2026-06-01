@@ -97,3 +97,14 @@ export function listReminderChains(): Promise<ChainNode[]> {
 export function moveReminderNode(patch: MovePatch): Promise<ReminderNode> {
   return invoke<ReminderNode>("move_reminder_node", { patch });
 }
+
+/** Change only a reminder's category — the manual correction escape hatch. */
+export interface ReminderCategoryPatch {
+  id: string;
+  category: ReminderCategory;
+  updatedAt: string;
+}
+
+export function setReminderCategory(patch: ReminderCategoryPatch): Promise<ReminderNode> {
+  return invoke<ReminderNode>("set_reminder_node_category", { patch });
+}

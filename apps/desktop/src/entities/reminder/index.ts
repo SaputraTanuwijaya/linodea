@@ -9,10 +9,12 @@ export {
   listReminderChains,
   listReminderNodes,
   moveReminderNode,
+  setReminderCategory,
   updateReminderNode,
   updateReminderNodeStatus,
   type AdvanceRecurrencePatch,
   type MovePatch,
+  type ReminderCategoryPatch,
   type ReminderEditPatch,
   type ReminderStatusPatch,
 } from "./api/commands";

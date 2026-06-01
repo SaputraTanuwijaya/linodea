@@ -158,6 +158,18 @@ pub struct MovePatch {
     pub updated_at: String,
 }
 
+/// Change just a reminder's category — the manual "fix the auto-guess" escape
+/// hatch. Optional and non-destructive (categories are an organizational
+/// nicety; reminders work regardless). Each correction is also a future
+/// training label for auto-categorization.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderCategoryPatch {
+    pub id: String,
+    pub category: String,
+    pub updated_at: String,
+}
+
 /// A node plus its ordered children, recursively. The assembled shape the
 /// chain view renders (GitHub-commit style). Roots and each child group are
 /// ordered by their previous/next links.
@@ -453,6 +465,50 @@ impl ReminderStore {
 
         self.get_reminder_by_id(&patch.id)?
             .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
+    }
+
+    /// Change only a reminder's category (the manual correction escape hatch).
+    pub fn set_reminder_category(
+        &self,
+        patch: ReminderCategoryPatch,
+    ) -> Result<ReminderNode, String> {
+        if patch.id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+        if patch.updated_at.trim().is_empty() {
+            return Err("Reminder update time is required.".to_string());
+        }
+        if !matches!(
+            patch.category.as_str(),
+            "university"
+                | "investing"
+                | "personal"
+                | "tutoring"
+                | "urgent"
+                | "waiting"
+                | "uncategorized"
+        ) {
+            return Err("Reminder category is not supported.".to_string());
+        }
+
+        let changed = self
+            .connection
+            .execute(
+                r#"
+                UPDATE reminder_nodes
+                SET category = ?2, updated_at = ?3, sync_version = sync_version + 1
+                WHERE id = ?1
+                "#,
+                params![patch.id, patch.category, patch.updated_at],
+            )
+            .map_err(to_store_error)?;
+
+        if changed == 0 {
+            return Err("Reminder was not found.".to_string());
+        }
+
+        self.get_reminder_by_id(&patch.id)?
+            .ok_or_else(|| "Reminder category was updated but could not be read back.".to_string())
     }
 
     /// Re-arm a recurring reminder onto its next occurrence: new time + rule,
@@ -1747,6 +1803,41 @@ mod tests {
         assert_eq!(chains.len(), 1);
         assert_eq!(chains[0].node.id, "x");
         assert!(chains[0].children.is_empty());
+    }
+
+    #[test]
+    fn sets_a_reminder_category() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("r1"))
+            .expect("reminder is created");
+
+        let updated = store
+            .set_reminder_category(ReminderCategoryPatch {
+                id: "r1".to_string(),
+                category: "investing".to_string(),
+                updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+            })
+            .expect("category is set");
+
+        assert_eq!(updated.category, "investing");
+        assert_eq!(updated.sync_version, 1);
+    }
+
+    #[test]
+    fn set_category_rejects_unknown() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("r1"))
+            .expect("reminder is created");
+
+        let result = store.set_reminder_category(ReminderCategoryPatch {
+            id: "r1".to_string(),
+            category: "not-a-category".to_string(),
+            updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+        });
+
+        assert!(result.is_err());
     }
 
     fn sample_reminder(id: &str) -> ReminderNode {

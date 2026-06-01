@@ -53,6 +53,7 @@ export interface Strings {
   chain: {
     queued: string;
     empty: string;
+    setCategory: string;
   };
   category: {
     university: string;
@@ -148,6 +149,7 @@ const STRINGS: Record<LanguageId, Strings> = {
     chain: {
       queued: "Chains",
       empty: "No reminders yet. Capture a few and they'll group here by category.",
+      setCategory: "Change category",
     },
     category: {
       university: "University",
@@ -251,6 +253,7 @@ const STRINGS: Record<LanguageId, Strings> = {
     chain: {
       queued: "Rantai",
       empty: "Belum ada pengingat. Tangkap beberapa dan akan dikelompokkan di sini per kategori.",
+      setCategory: "Ubah kategori",
     },
     category: {
       university: "Kuliah",
