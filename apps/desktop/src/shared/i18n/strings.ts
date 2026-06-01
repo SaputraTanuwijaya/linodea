@@ -15,6 +15,7 @@
  */
 
 import type { LangTag } from "@linodea/parser";
+import type { Recurrence } from "@linodea/types";
 
 /** Language id. Matches the parser's LangTag so it can be threaded through. */
 export type LanguageId = LangTag;
@@ -83,11 +84,16 @@ export interface Strings {
   /** Slash-command autocomplete: per-command label + description shown in the dropdown. */
   slash: {
     countdown: { label: string; description: string };
+    recur: { label: string; description: string };
   };
   /** On-screen countdown timer window. */
   timer: {
     caption: string;
     dismiss: string;
+  };
+  recurrence: {
+    /** Human summary of a repeat rule, e.g. "every Monday ×6" / "tiap hari". */
+    describe: (rule: Recurrence) => string;
   };
 }
 
@@ -171,10 +177,17 @@ const STRINGS: Record<LanguageId, Strings> = {
         label: "/countdown",
         description: "Keep exact-second timing and show an on-screen countdown.",
       },
+      recur: {
+        label: "/recur",
+        description: "Repeat a reminder — e.g. every monday 8am, every 2 days 9am ×5.",
+      },
     },
     timer: {
       caption: "Countdown",
       dismiss: "Dismiss timer",
+    },
+    recurrence: {
+      describe: (rule) => describeRecurrenceEnglish(rule),
     },
   },
   id: {
@@ -253,10 +266,17 @@ const STRINGS: Record<LanguageId, Strings> = {
         label: "/countdown",
         description: "Pertahankan waktu detik tepat dan tampilkan hitung mundur di layar.",
       },
+      recur: {
+        label: "/recur",
+        description: "Ulangi pengingat — mis. tiap hari jam 7, every 2 days 9am ×5.",
+      },
     },
     timer: {
       caption: "Hitung mundur",
       dismiss: "Tutup timer",
+    },
+    recurrence: {
+      describe: (rule) => describeRecurrenceIndonesian(rule),
     },
   },
 };
@@ -315,4 +335,56 @@ function describeIndonesian(minutes: number): string {
     return `${hours} jam sebelumnya`;
   }
   return `${minutes} menit sebelumnya`;
+}
+
+// --- Recurrence summaries (used by recurrence.describe) --------------------
+
+const WEEKDAYS_EN = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+const WEEKDAYS_ID = [
+  "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+];
+const FREQ_UNIT_EN: Record<Recurrence["freq"], string> = {
+  daily: "days",
+  weekly: "weeks",
+  monthly: "months",
+};
+const FREQ_UNIT_ID: Record<Recurrence["freq"], string> = {
+  daily: "hari",
+  weekly: "minggu",
+  monthly: "bulan",
+};
+
+function withCount(base: string, count: number | undefined): string {
+  return count === undefined ? base : `${base} ×${count}`;
+}
+
+function describeRecurrenceEnglish(rule: Recurrence): string {
+  let base: string;
+  if (rule.freq === "weekly" && rule.weekday !== undefined) {
+    base = `every ${WEEKDAYS_EN[rule.weekday] ?? "week"}`;
+  } else if (rule.interval > 1) {
+    base = `every ${rule.interval} ${FREQ_UNIT_EN[rule.freq]}`;
+  } else {
+    base =
+      rule.freq === "daily"
+        ? "every day"
+        : rule.freq === "weekly"
+          ? "every week"
+          : "every month";
+  }
+  return withCount(base, rule.count);
+}
+
+function describeRecurrenceIndonesian(rule: Recurrence): string {
+  let base: string;
+  if (rule.freq === "weekly" && rule.weekday !== undefined) {
+    base = `tiap ${WEEKDAYS_ID[rule.weekday] ?? "minggu"}`;
+  } else if (rule.interval > 1) {
+    base = `tiap ${rule.interval} ${FREQ_UNIT_ID[rule.freq]}`;
+  } else {
+    base = `tiap ${FREQ_UNIT_ID[rule.freq]}`;
+  }
+  return withCount(base, rule.count);
 }

@@ -33,6 +33,7 @@ export function createReminderNode(
     category: parseResult.draft.category,
     checklist: parseResult.draft.checklist,
     confidence: parseResult.draft.confidence,
+    recurrence: parseResult.draft.recurrence,
     createdAt: now,
     updatedAt: now,
     createdOnDeviceId: deviceId,

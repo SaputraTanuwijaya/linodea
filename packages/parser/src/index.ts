@@ -3,6 +3,7 @@ import type {
   IsoDateTimeString,
   ParserIssue,
   ParsedReminderDraft,
+  Recurrence,
   ReminderCategory,
   ReminderParseResult,
   ReminderType,
@@ -85,6 +86,7 @@ interface DateTimeParse {
   hasScheduledAt: boolean;
   hasDate: boolean;
   hasTime: boolean;
+  recurrence?: Recurrence;
 }
 
 interface ChecklistParse {
@@ -203,6 +205,7 @@ export function parseReminderWithNow(
     category: detectReminderCategory(normalizedInput),
     checklist: checklistParse.checklist,
     confidence,
+    recurrence: dateTime.recurrence,
   };
 
   return {
@@ -212,6 +215,7 @@ export function parseReminderWithNow(
     draft,
     issues,
     countdown,
+    recurrence: dateTime.recurrence,
   };
 }
 
@@ -222,6 +226,53 @@ function parseDateTime(
   preferredLanguage: PreferredLanguage,
   countdown: boolean,
 ): DateTimeParse {
+  // Recurrence is checked before relative time: `every 2 days` would otherwise
+  // be claimed by the bare-relative matcher (`2 days`) as a one-off. Recurrence
+  // always needs an explicit cadence keyword, so one-off `in 2 days` is safe.
+  const recurrenceFinding = findRecurrence(input);
+  if (recurrenceFinding) {
+    const time = findClockTime(input);
+    const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
+    const segments = [
+      ...recurrenceFinding.segments,
+      ...(time ? [time.segment] : []),
+    ];
+
+    // A recurring reminder needs a clock-time anchor; without one we can't
+    // schedule it (same rule as a date with no time).
+    if (!time) {
+      return {
+        segments,
+        issues: [
+          ...timeIssues,
+          {
+            code: "missing_time",
+            message: "A repeat was found, but no clock time was found.",
+          },
+        ],
+        hasScheduledAt: false,
+        hasDate: false,
+        hasTime: false,
+        recurrence: recurrenceFinding.recurrence,
+      };
+    }
+
+    return {
+      scheduledAt: firstRecurrenceOccurrence(
+        now,
+        timezone,
+        recurrenceFinding.recurrence,
+        time.parts,
+      ),
+      segments,
+      issues: timeIssues,
+      hasScheduledAt: true,
+      hasDate: true,
+      hasTime: true,
+      recurrence: recurrenceFinding.recurrence,
+    };
+  }
+
   const relative = findRelativeTime(input);
   if (relative) {
     // Default: snap to the nearest minute (:00) so firing is clean and
@@ -353,6 +404,132 @@ function findRelativeTime(input: string):
     ms: relativeUnitToMs(Number(match[1]), match[2]),
     segment: { start: match.index, end: match.index + match[0].length },
   };
+}
+
+/** Weekday name → index (0 = Sunday). EN full + 3-letter; ID full. */
+const WEEKDAY_INDEX: Record<string, number> = {
+  sunday: 0, sun: 0, minggu: 0,
+  monday: 1, mon: 1, senin: 1,
+  tuesday: 2, tue: 2, tues: 2, selasa: 2,
+  wednesday: 3, wed: 3, rabu: 3,
+  thursday: 4, thu: 4, thur: 4, thurs: 4, kamis: 4,
+  friday: 5, fri: 5, jumat: 5, "jum'at": 5,
+  saturday: 6, sat: 6, sabtu: 6,
+};
+
+const UNIT_TO_FREQ: Record<string, Recurrence["freq"]> = {
+  day: "daily", days: "daily", hari: "daily",
+  week: "weekly", weeks: "weekly", minggu: "weekly",
+  month: "monthly", months: "monthly", bulan: "monthly",
+};
+
+/**
+ * Detect a recurrence rule (cadence + optional repeat count). Requires an
+ * explicit cadence keyword (`every`/`each`/`daily`/`weekly`/`monthly` or
+ * `tiap`/`setiap`), so one-off relative phrases (`in 2 days`) are never caught.
+ * Returns the rule plus the text segments to strip from the title.
+ */
+function findRecurrence(
+  input: string,
+): { recurrence: Recurrence; segments: TextSegment[] } | undefined {
+  const base = matchCadence(input);
+  if (!base) return undefined;
+
+  const segments = [base.segment];
+  const count = findCount(input);
+  if (count) {
+    segments.push(count.segment);
+  }
+
+  return {
+    recurrence: { ...base.recurrence, ...(count ? { count: count.value } : {}) },
+    segments,
+  };
+}
+
+/** Match just the cadence (frequency + interval + optional weekday). */
+function matchCadence(
+  input: string,
+): { recurrence: Recurrence; segment: TextSegment } | undefined {
+  const make = (
+    match: RegExpExecArray,
+    recurrence: Recurrence,
+  ): { recurrence: Recurrence; segment: TextSegment } => ({
+    recurrence,
+    segment: { start: match.index, end: match.index + match[0].length },
+  });
+
+  // Interval forms first (they carry a number): "every 2 weeks", "tiap 3 hari".
+  const interval =
+    /\b(?:every|each|tiap|setiap)\s+(\d{1,3})\s+(days?|weeks?|months?|hari|minggu|bulan)\b/i.exec(
+      input,
+    );
+  if (interval?.index !== undefined) {
+    return make(interval, {
+      freq: UNIT_TO_FREQ[interval[2].toLowerCase()],
+      interval: Math.max(1, Number(interval[1])),
+    });
+  }
+
+  // "every other week/day/month" → interval 2.
+  const other = /\b(?:every|each)\s+other\s+(day|week|month)\b/i.exec(input);
+  if (other?.index !== undefined) {
+    return make(other, { freq: UNIT_TO_FREQ[other[1].toLowerCase()], interval: 2 });
+  }
+
+  // Weekday-specific: "every monday", "tiap hari senin", "setiap minggu" stays
+  // weekly (handled below) — only `hari <day>` or a non-"minggu" day name here.
+  const weekday =
+    /\b(?:every|each)\s+([a-z]+)\b/i.exec(input) ??
+    /\b(?:tiap|setiap)\s+hari\s+([a-z']+)\b/i.exec(input) ??
+    /\b(?:tiap|setiap)\s+(senin|selasa|rabu|kamis|jumat|sabtu)\b/i.exec(input);
+  if (weekday?.index !== undefined) {
+    const day = WEEKDAY_INDEX[weekday[1].toLowerCase()];
+    if (day !== undefined) {
+      return make(weekday, { freq: "weekly", interval: 1, weekday: day });
+    }
+  }
+
+  // Plain frequency words.
+  const daily = /\b(?:every\s+day|each\s+day|daily|(?:tiap|setiap)\s+hari)\b/i.exec(input);
+  if (daily?.index !== undefined) {
+    return make(daily, { freq: "daily", interval: 1 });
+  }
+
+  const weekly = /\b(?:every\s+week|weekly|(?:tiap|setiap)\s+minggu)\b/i.exec(input);
+  if (weekly?.index !== undefined) {
+    return make(weekly, { freq: "weekly", interval: 1 });
+  }
+
+  const monthly = /\b(?:every\s+month|monthly|(?:tiap|setiap)\s+bulan)\b/i.exec(input);
+  if (monthly?.index !== undefined) {
+    return make(monthly, { freq: "monthly", interval: 1 });
+  }
+
+  return undefined;
+}
+
+/** Match a repeat count: `×5`, `x5`, `5 times`, `5 kali`, `sebanyak 5 kali`. */
+function findCount(input: string): { value: number; segment: TextSegment } | undefined {
+  const patterns = [
+    /\bsebanyak\s+(\d{1,3})\s+kali\b/i,
+    /\b(\d{1,3})\s*(?:times|kali)\b/i,
+    /(?:^|\s)[×x]\s*(\d{1,3})\b/i,
+    /\b(\d{1,3})\s*[×x]\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(input);
+    if (match?.index !== undefined) {
+      const value = Number(match[1]);
+      if (value >= 1) {
+        return {
+          value,
+          segment: { start: match.index, end: match.index + match[0].length },
+        };
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -953,6 +1130,105 @@ function nextTimeOccurrence(
   const tomorrow = addDaysInTimezone(now, timezone, 1);
   return localDateTimeToUtcIso(
     { ...tomorrow, hour: time.hour, minute: time.minute, second: 0 },
+    timezone,
+  );
+}
+
+/**
+ * First fire of a recurring reminder. Weekday rules anchor on the next matching
+ * weekday; daily / weekly-without-a-day / monthly anchor on today and roll
+ * forward by one interval if today's time has already passed.
+ */
+function firstRecurrenceOccurrence(
+  now: Date,
+  timezone: IanaTimezone,
+  recurrence: Recurrence,
+  time: TimeParts,
+): IsoDateTimeString {
+  if (recurrence.freq === "weekly" && recurrence.weekday !== undefined) {
+    return nextWeekdayOccurrence(now, timezone, recurrence.weekday, time);
+  }
+
+  const today = addDaysInTimezone(now, timezone, 0);
+  const candidate = localDateTimeToUtcDate(
+    { ...today, hour: time.hour, minute: time.minute, second: 0 },
+    timezone,
+  );
+  if (candidate.getTime() > now.getTime()) {
+    return candidate.toISOString();
+  }
+  return addRecurrenceInterval(candidate.toISOString(), recurrence, timezone);
+}
+
+/** Next date (within 7 days) whose local weekday matches, at the given time. */
+function nextWeekdayOccurrence(
+  now: Date,
+  timezone: IanaTimezone,
+  weekday: number,
+  time: TimeParts,
+): IsoDateTimeString {
+  for (let add = 0; add <= 7; add += 1) {
+    const day = addDaysInTimezone(now, timezone, add);
+    const dow = new Date(Date.UTC(day.year, day.month - 1, day.day)).getUTCDay();
+    if (dow !== weekday) continue;
+    const candidate = localDateTimeToUtcDate(
+      { ...day, hour: time.hour, minute: time.minute, second: 0 },
+      timezone,
+    );
+    if (candidate.getTime() > now.getTime()) {
+      return candidate.toISOString();
+    }
+  }
+  // Unreachable in practice (add=0 and add=7 share the weekday), but stay safe.
+  const fallback = addDaysInTimezone(now, timezone, 7);
+  return localDateTimeToUtcIso(
+    { ...fallback, hour: time.hour, minute: time.minute, second: 0 },
+    timezone,
+  );
+}
+
+/**
+ * Advance an ISO instant by one recurrence interval, preserving the local time
+ * of day. Used by the scheduler to re-arm the next occurrence after a fire.
+ * Monthly clamps the day to the target month's length (Jan 31 → Feb 28/29).
+ */
+export function addRecurrenceInterval(
+  currentIso: IsoDateTimeString,
+  recurrence: Pick<Recurrence, "freq" | "interval">,
+  timezone: IanaTimezone,
+): IsoDateTimeString {
+  const parts = getLocalParts(new Date(currentIso), timezone);
+  const interval = Math.max(1, recurrence.interval);
+
+  if (recurrence.freq === "monthly") {
+    const totalMonths = parts.month - 1 + interval;
+    const year = parts.year + Math.floor(totalMonths / 12);
+    const month = ((totalMonths % 12) + 12) % 12; // 0-based
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    return localDateTimeToUtcIso(
+      {
+        year,
+        month: month + 1,
+        day: Math.min(parts.day, daysInMonth),
+        hour: parts.hour,
+        minute: parts.minute,
+        second: 0,
+      },
+      timezone,
+    );
+  }
+
+  const days = recurrence.freq === "weekly" ? 7 * interval : interval;
+  const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return localDateTimeToUtcIso(
+    {
+      year: shifted.getUTCFullYear(),
+      month: shifted.getUTCMonth() + 1,
+      day: shifted.getUTCDate(),
+      hour: parts.hour,
+      minute: parts.minute,
+      second: 0,
+    },
     timezone,
   );
 }

@@ -8,6 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Recurrence,
   ReminderCategory,
   ReminderNode,
   ReminderStatus,
@@ -33,6 +34,15 @@ export interface ReminderEditPatch {
   type: ReminderType;
   category: ReminderCategory;
   checklist: string[];
+  recurrence?: Recurrence;
+  updatedAt: string;
+}
+
+/** Re-arm a recurring reminder onto its next occurrence (new time + rule). */
+export interface AdvanceRecurrencePatch {
+  id: string;
+  scheduledAt: string;
+  recurrence?: Recurrence;
   updatedAt: string;
 }
 
@@ -56,4 +66,10 @@ export function updateReminderNode(patch: ReminderEditPatch): Promise<ReminderNo
 
 export function deleteReminderNode(id: string): Promise<void> {
   return invoke<void>("delete_reminder_node", { id });
+}
+
+export function advanceReminderRecurrence(
+  patch: AdvanceRecurrencePatch,
+): Promise<ReminderNode> {
+  return invoke<ReminderNode>("advance_reminder_recurrence", { patch });
 }

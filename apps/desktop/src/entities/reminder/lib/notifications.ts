@@ -14,11 +14,16 @@
 
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
+import { addRecurrenceInterval } from "@linodea/parser";
 import type { ReminderNode } from "@linodea/types";
 
 import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
 
-import { listReminderNodes, updateReminderNodeStatus } from "../api/commands";
+import {
+  advanceReminderRecurrence,
+  listReminderNodes,
+  updateReminderNodeStatus,
+} from "../api/commands";
 import { isActionable } from "../model/reminder";
 
 /** Payload for the custom Linodea alert window (`show_alert` Rust command).
@@ -129,7 +134,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
       sentCount += 1;
     }
 
-    // T-due + auto-done ----------------------------------------------
+    // T-due — fire, then either re-arm (recurring) or auto-done ------
     if (!record.due) {
       if (dueMs <= now) {
         showAlert({
@@ -138,25 +143,61 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
           kind: "due",
           whenMs: dueMs,
         });
-        record.due = true;
         sentCount += 1;
-
         const nowIso = new Date(now).toISOString();
-        try {
-          await updateReminderNodeStatus({
-            id: reminder.id,
-            status: "done",
-            updatedAt: nowIso,
-            completedAt: nowIso,
-          });
-          autoDoneCount += 1;
-        } catch {
-          // Mark-done failed (offline DB, etc.) but the toast already
-          // fired. Keep `record.due = true` so we never re-fire. The
-          // reminder will stay pending in SQLite; the next sync pass will
-          // attempt to mark-done again because we re-detect dueMs<=now
-          // but `record.due` blocks re-firing. (Cost: orphan pending row
-          // until manual cleanup or a future repair pass.)
+
+        const rule = reminder.recurrence;
+        const hasNextOccurrence =
+          rule !== undefined && (rule.count === undefined || rule.count > 1);
+
+        if (rule && hasNextOccurrence) {
+          // Recurring: re-arm the next occurrence instead of marking done.
+          // Advance from `scheduledAt` (the regular slot), not a snooze time.
+          const nextIso = addRecurrenceInterval(
+            reminder.scheduledAt,
+            rule,
+            reminder.timezone,
+          );
+          try {
+            await advanceReminderRecurrence({
+              id: reminder.id,
+              scheduledAt: nextIso,
+              recurrence: {
+                ...rule,
+                count: rule.count === undefined ? undefined : rule.count - 1,
+              },
+              updatedAt: nowIso,
+            });
+            // Forget this cycle's fire record so the next occurrence re-fires
+            // its prealerts + due, and arm the precise timer for it now.
+            delete store[reminder.id];
+            const nextMs = new Date(nextIso).getTime();
+            if (Number.isFinite(nextMs)) nextFireMs = Math.min(nextFireMs, nextMs);
+            continue;
+          } catch {
+            // Re-arm failed (offline DB, etc.) but the alert already fired.
+            // Mark `due` so we don't spam; it stays pending in SQLite and a
+            // later pass can recover.
+            record.due = true;
+          }
+        } else {
+          record.due = true;
+          try {
+            await updateReminderNodeStatus({
+              id: reminder.id,
+              status: "done",
+              updatedAt: nowIso,
+              completedAt: nowIso,
+            });
+            autoDoneCount += 1;
+          } catch {
+            // Mark-done failed (offline DB, etc.) but the toast already
+            // fired. Keep `record.due = true` so we never re-fire. The
+            // reminder will stay pending in SQLite; the next sync pass will
+            // attempt to mark-done again because we re-detect dueMs<=now
+            // but `record.due` blocks re-firing. (Cost: orphan pending row
+            // until manual cleanup or a future repair pass.)
+          }
         }
       } else {
         // Future due time — candidate for the next precise wake.

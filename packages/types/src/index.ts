@@ -75,6 +75,7 @@ export interface ReminderNode {
   nextId?: ReminderNodeId;
   checklist: string[];
   confidence: number;
+  recurrence?: Recurrence;
   createdAt: IsoDateTimeString;
   updatedAt: IsoDateTimeString;
   completedAt?: IsoDateTimeString;
@@ -103,6 +104,28 @@ export type ReminderPatch = Partial<
   >
 >;
 
+export const RECURRENCE_FREQUENCIES = ["daily", "weekly", "monthly"] as const;
+
+export type RecurrenceFrequency = (typeof RECURRENCE_FREQUENCIES)[number];
+
+/**
+ * A repeat rule for a recurring reminder. The parser derives it from natural
+ * language ("every monday 8am", "tiap hari", "every 2 days ×5"); the scheduler
+ * advances `scheduledAt` by the rule each time the reminder fires.
+ */
+export interface Recurrence {
+  freq: RecurrenceFrequency;
+  /** Repeat every `interval` units (>= 1). "every other" → 2. */
+  interval: number;
+  /** 0..6 (Sun..Sat) — set only for weekly-on-a-named-day ("every monday"). */
+  weekday?: number;
+  /**
+   * Occurrences remaining, including the currently scheduled one. Omitted means
+   * unbounded (repeats until the user deletes it). Decremented on each fire.
+   */
+  count?: number;
+}
+
 export interface ParsedReminderDraft {
   title: string;
   scheduledAt?: IsoDateTimeString;
@@ -111,6 +134,7 @@ export interface ParsedReminderDraft {
   category: ReminderCategory;
   checklist: string[];
   confidence: number;
+  recurrence?: Recurrence;
 }
 
 export type ParserIssueCode =
@@ -146,6 +170,8 @@ export interface ReminderParseResult {
    * Surfaced so the capture UI can show the on-screen countdown timer window.
    */
   countdown?: boolean;
+  /** Repeat rule, when the input described a recurring reminder. */
+  recurrence?: Recurrence;
 }
 
 export interface ShortcutSettings {

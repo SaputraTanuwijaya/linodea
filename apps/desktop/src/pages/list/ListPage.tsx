@@ -140,6 +140,7 @@ export function ListPage({
         type: parsed.draft.type,
         category: parsed.draft.category,
         checklist: parsed.draft.checklist,
+        recurrence: parsed.draft.recurrence,
         updatedAt: new Date().toISOString(),
       }),
     );
@@ -244,6 +245,11 @@ export function ListPage({
                   <p className="truncate text-xs text-[var(--lin-text-dim)]">
                     {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
                   </p>
+                  {reminder.recurrence ? (
+                    <p className="truncate text-xs text-[var(--lin-text-mute)]">
+                      ↻ {strings.recurrence.describe(reminder.recurrence)}
+                    </p>
+                  ) : null}
                 </div>
                 <RowButton
                   disabled={isBusy}

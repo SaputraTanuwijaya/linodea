@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseReminderWithNow } from "../dist/index.js";
+import { addRecurrenceInterval, parseReminderWithNow } from "../dist/index.js";
 
 const options = {
   now: "2026-05-22T01:00:00+07:00",
@@ -330,3 +330,98 @@ for (const phrase of [
     assert.equal(result.draft.scheduledAt, undefined);
   });
 }
+
+// --- Recurring reminders (S36) ---
+// `options` now = 2026-05-21T18:00:00Z == Fri 2026-05-22 01:00 Jakarta.
+
+test("every <weekday> + time → weekly on that weekday", () => {
+  const result = parseReminderWithNow("every monday 8am standup", options);
+
+  // Next Monday after Fri May 22 is May 25; 08:00 Jakarta == 01:00Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-25T01:00:00.000Z");
+  assert.equal(result.draft.title, "standup");
+  assert.deepEqual(result.recurrence, { freq: "weekly", interval: 1, weekday: 1 });
+  assert.deepEqual(result.draft.recurrence, { freq: "weekly", interval: 1, weekday: 1 });
+});
+
+test("Indonesian daily recurrence with marker time", () => {
+  const result = parseReminderWithNow("tiap hari jam 7 pagi olahraga", options);
+
+  // 07:00 today is still ahead (now 01:00 local) → today 07:00 Jakarta == 00:00Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-22T00:00:00.000Z");
+  assert.equal(result.draft.title, "olahraga");
+  assert.deepEqual(result.recurrence, { freq: "daily", interval: 1 });
+});
+
+test("interval days + count, keyword stripped from title", () => {
+  const result = parseReminderWithNow("every 2 days 9am review ×5", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-22T02:00:00.000Z");
+  assert.equal(result.draft.title, "review");
+  assert.deepEqual(result.recurrence, { freq: "daily", interval: 2, count: 5 });
+});
+
+test("Indonesian weekly with 'sebanyak N kali' count", () => {
+  const result = parseReminderWithNow("setiap minggu 19:00 sync sebanyak 3 kali", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-22T12:00:00.000Z");
+  assert.equal(result.draft.title, "sync");
+  assert.deepEqual(result.recurrence, { freq: "weekly", interval: 1, count: 3 });
+});
+
+test("monthly recurrence", () => {
+  const result = parseReminderWithNow("every month 09:00 pay rent", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-22T02:00:00.000Z");
+  assert.equal(result.draft.title, "pay rent");
+  assert.deepEqual(result.recurrence, { freq: "monthly", interval: 1 });
+});
+
+test("recurrence without a clock time does not schedule", () => {
+  const result = parseReminderWithNow("every day water plants", options);
+
+  assert.equal(result.draft.scheduledAt, undefined);
+  assert.deepEqual(result.recurrence, { freq: "daily", interval: 1 });
+  assert.ok(result.issues.some((i) => i.code === "missing_time"));
+});
+
+test("one-off 'in 2 days' is not treated as recurring", () => {
+  const result = parseReminderWithNow("in 2 days submit", options);
+
+  assert.equal(result.recurrence, undefined);
+  assert.ok(result.draft.scheduledAt); // still a valid one-off
+});
+
+test("'every now and then' is not a recurrence", () => {
+  const result = parseReminderWithNow("every now and then call", options);
+
+  assert.equal(result.recurrence, undefined);
+  assert.equal(result.draft.scheduledAt, undefined);
+});
+
+// addRecurrenceInterval — the scheduler's re-arm helper.
+const TZ = "Asia/Jakarta";
+
+test("addRecurrenceInterval advances daily/weekly preserving local time", () => {
+  // 2026-05-22T02:00:00Z == 09:00 Jakarta.
+  assert.equal(
+    addRecurrenceInterval("2026-05-22T02:00:00.000Z", { freq: "daily", interval: 1 }, TZ),
+    "2026-05-23T02:00:00.000Z",
+  );
+  assert.equal(
+    addRecurrenceInterval("2026-05-22T02:00:00.000Z", { freq: "daily", interval: 2 }, TZ),
+    "2026-05-24T02:00:00.000Z",
+  );
+  assert.equal(
+    addRecurrenceInterval("2026-05-22T02:00:00.000Z", { freq: "weekly", interval: 1 }, TZ),
+    "2026-05-29T02:00:00.000Z",
+  );
+});
+
+test("addRecurrenceInterval monthly clamps the day to month length", () => {
+  // 2026-01-31T05:00:00Z == 12:00 Jakarta Jan 31; +1 month → Feb 28 (2026 not leap).
+  assert.equal(
+    addRecurrenceInterval("2026-01-31T05:00:00.000Z", { freq: "monthly", interval: 1 }, TZ),
+    "2026-02-28T05:00:00.000Z",
+  );
+});

@@ -39,6 +39,14 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 - `jam 7 pagi`, `jam 19`
 - Bare 24-hour `19:00` — recognized with or without a date word. Time-only resolves to **today** if the time is still ahead, otherwise **tomorrow** (you can't schedule into the past). The pattern is strict (`16:9`, `2:5`, `16:90` don't match); separator is `:` only.
 
+### Recurrence
+
+- Requires an explicit cadence keyword, so one-off phrases (`in 2 days`) are never caught. Checked **before** relative time.
+- Frequencies (EN + ID): daily (`every day`/`daily`/`tiap hari`), weekly (`every week`/`weekly`/`tiap minggu`), weekly-on-a-day (`every monday`/`tiap hari senin`), monthly (`every month`/`monthly`/`tiap bulan`). Intervals: `every 2 days`, `tiap 3 minggu`, `every other week`.
+- Optional repeat count (`×5`, `5x`, `5 times`, `5 kali`, `sebanyak 5 kali`); omitted ⇒ unbounded.
+- A recurring reminder **requires a clock time** to anchor; without one it emits `missing_time` and doesn't schedule. First occurrence: daily → next time today/tomorrow; weekday → next matching weekday; weekly-no-day / monthly → today at the time, else +interval.
+- The rule is surfaced as `Recurrence` on the draft + result. `parseReminder` does **not** advance occurrences — the app scheduler calls `addRecurrenceInterval(currentIso, rule, timezone)` (exported) to compute the next fire after each occurrence (monthly clamps the day to the target month's length).
+
 ### Checklist cues
 
 Trigger words: `bring`, `bawa`, `prepare`, `siapin`, `open`, `buka`.

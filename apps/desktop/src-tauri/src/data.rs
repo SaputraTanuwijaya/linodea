@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-const CURRENT_SCHEMA_VERSION: i64 = 1;
+const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS reminder_nodes (
   previous_id TEXT,
   next_id TEXT,
   checklist_json TEXT NOT NULL,
+  recurrence_json TEXT,
   confidence REAL NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -57,6 +58,19 @@ CREATE INDEX IF NOT EXISTS idx_reminder_nodes_status_scheduled_at
 CREATE INDEX IF NOT EXISTS idx_reminder_nodes_parent_id
   ON reminder_nodes (parent_id);
 "#;
+
+/// Repeat rule for a recurring reminder, stored as JSON in `recurrence_json`.
+/// Mirrors the `Recurrence` shape in `@linodea/types`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recurrence {
+    pub freq: String,
+    pub interval: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<i64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +90,8 @@ pub struct ReminderNode {
     pub previous_id: Option<String>,
     pub next_id: Option<String>,
     pub checklist: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<Recurrence>,
     pub confidence: f64,
     pub created_at: String,
     pub updated_at: String,
@@ -111,6 +127,19 @@ pub struct ReminderEditPatch {
     pub reminder_type: String,
     pub category: String,
     pub checklist: Vec<String>,
+    pub recurrence: Option<Recurrence>,
+    pub updated_at: String,
+}
+
+/// Re-arm a recurring reminder onto its next occurrence: a new `scheduled_at`,
+/// the (decremented) recurrence rule, and a reset to `pending`. Issued by the
+/// JS scheduler when a recurring reminder fires.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvanceRecurrencePatch {
+    pub id: String,
+    pub scheduled_at: String,
+    pub recurrence: Option<Recurrence>,
     pub updated_at: String,
 }
 
@@ -143,6 +172,7 @@ impl ReminderStore {
         validate_reminder(&reminder)?;
 
         let checklist_json = serde_json::to_string(&reminder.checklist).map_err(to_store_error)?;
+        let recurrence_json = serialize_recurrence(&reminder.recurrence)?;
         self.connection
             .execute(
                 r#"
@@ -161,6 +191,7 @@ impl ReminderStore {
                   previous_id,
                   next_id,
                   checklist_json,
+                  recurrence_json,
                   confidence,
                   created_at,
                   updated_at,
@@ -169,7 +200,7 @@ impl ReminderStore {
                   created_on_device_id,
                   sync_version
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
                 "#,
                 params![
                     reminder.id,
@@ -186,6 +217,7 @@ impl ReminderStore {
                     reminder.previous_id,
                     reminder.next_id,
                     checklist_json,
+                    recurrence_json,
                     reminder.confidence,
                     reminder.created_at,
                     reminder.updated_at,
@@ -221,6 +253,7 @@ impl ReminderStore {
                   previous_id,
                   next_id,
                   checklist_json,
+                  recurrence_json,
                   confidence,
                   created_at,
                   updated_at,
@@ -270,6 +303,7 @@ impl ReminderStore {
                   previous_id,
                   next_id,
                   checklist_json,
+                  recurrence_json,
                   confidence,
                   created_at,
                   updated_at,
@@ -354,6 +388,7 @@ impl ReminderStore {
         validate_edit_patch(&patch)?;
 
         let checklist_json = serde_json::to_string(&patch.checklist).map_err(to_store_error)?;
+        let recurrence_json = serialize_recurrence(&patch.recurrence)?;
         let changed = self
             .connection
             .execute(
@@ -367,7 +402,8 @@ impl ReminderStore {
                   reminder_type = ?6,
                   category = ?7,
                   checklist_json = ?8,
-                  updated_at = ?9,
+                  recurrence_json = ?9,
+                  updated_at = ?10,
                   sync_version = sync_version + 1
                 WHERE id = ?1
                 "#,
@@ -380,6 +416,7 @@ impl ReminderStore {
                     patch.reminder_type,
                     patch.category,
                     checklist_json,
+                    recurrence_json,
                     patch.updated_at,
                 ],
             )
@@ -391,6 +428,52 @@ impl ReminderStore {
 
         self.get_reminder_by_id(&patch.id)?
             .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
+    }
+
+    /// Re-arm a recurring reminder onto its next occurrence: new time + rule,
+    /// status back to `pending`, lifecycle timestamps cleared.
+    pub fn advance_reminder_recurrence(
+        &self,
+        patch: AdvanceRecurrencePatch,
+    ) -> Result<ReminderNode, String> {
+        if patch.id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+        if patch.scheduled_at.trim().is_empty() {
+            return Err("Reminder scheduled time is required.".to_string());
+        }
+
+        let recurrence_json = serialize_recurrence(&patch.recurrence)?;
+        let changed = self
+            .connection
+            .execute(
+                r#"
+                UPDATE reminder_nodes
+                SET
+                  scheduled_at = ?2,
+                  recurrence_json = ?3,
+                  status = 'pending',
+                  completed_at = NULL,
+                  snoozed_until = NULL,
+                  updated_at = ?4,
+                  sync_version = sync_version + 1
+                WHERE id = ?1
+                "#,
+                params![
+                    patch.id,
+                    patch.scheduled_at,
+                    recurrence_json,
+                    patch.updated_at,
+                ],
+            )
+            .map_err(to_store_error)?;
+
+        if changed == 0 {
+            return Err("Reminder was not found.".to_string());
+        }
+
+        self.get_reminder_by_id(&patch.id)?
+            .ok_or_else(|| "Reminder was advanced but could not be read back.".to_string())
     }
 
     pub fn delete_reminder(&self, id: &str) -> Result<(), String> {
@@ -421,20 +504,52 @@ impl ReminderStore {
     }
 
     fn migrate(&self) -> Result<(), String> {
+        // Fresh installs get every column (incl. recurrence_json) from the base
+        // schema. The `IF NOT EXISTS` create is a no-op on existing DBs.
         self.connection
             .execute_batch(SCHEMA)
             .map_err(to_store_error)?;
+
+        // v2: pre-existing tables predate `recurrence_json` — add it. Guarded by
+        // a column check so this is idempotent and never errors on fresh installs.
+        if !self.column_exists("reminder_nodes", "recurrence_json")? {
+            self.connection
+                .execute(
+                    "ALTER TABLE reminder_nodes ADD COLUMN recurrence_json TEXT",
+                    [],
+                )
+                .map_err(to_store_error)?;
+        }
+
         self.connection
             .execute(
-                r#"
-                INSERT OR IGNORE INTO schema_migrations (version, name)
-                VALUES (?1, ?2)
-                "#,
-                params![CURRENT_SCHEMA_VERSION, "base_reminder_nodes"],
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                params![1, "base_reminder_nodes"],
+            )
+            .map_err(to_store_error)?;
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                params![CURRENT_SCHEMA_VERSION, "add_recurrence"],
             )
             .map_err(to_store_error)?;
 
         Ok(())
+    }
+
+    fn column_exists(&self, table: &str, column: &str) -> Result<bool, String> {
+        let mut statement = self
+            .connection
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .map_err(to_store_error)?;
+        let mut rows = statement.query([]).map_err(to_store_error)?;
+        while let Some(row) = rows.next().map_err(to_store_error)? {
+            let name: String = row.get("name").map_err(to_store_error)?;
+            if name == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn get_reminder_by_id(&self, id: &str) -> Result<Option<ReminderNode>, String> {
@@ -457,6 +572,7 @@ impl ReminderStore {
                   previous_id,
                   next_id,
                   checklist_json,
+                  recurrence_json,
                   confidence,
                   created_at,
                   updated_at,
@@ -498,6 +614,20 @@ fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> 
         )
     })?;
 
+    let recurrence_json: Option<String> = row.get("recurrence_json")?;
+    let recurrence = match recurrence_json {
+        Some(raw) if !raw.trim().is_empty() => {
+            Some(serde_json::from_str(&raw).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    raw.len(),
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?)
+        }
+        _ => None,
+    };
+
     Ok(ReminderNode {
         id: row.get("id")?,
         user_id: row.get("user_id")?,
@@ -513,6 +643,7 @@ fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> 
         previous_id: row.get("previous_id")?,
         next_id: row.get("next_id")?,
         checklist,
+        recurrence,
         confidence: row.get("confidence")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
@@ -627,6 +758,17 @@ fn validate_edit_patch(patch: &ReminderEditPatch) -> Result<(), String> {
 
 fn to_store_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+/// Serialize an optional recurrence rule to the JSON stored in `recurrence_json`
+/// (`None` → SQL NULL).
+fn serialize_recurrence(recurrence: &Option<Recurrence>) -> Result<Option<String>, String> {
+    match recurrence {
+        Some(rule) => serde_json::to_string(rule)
+            .map(Some)
+            .map_err(to_store_error),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -758,6 +900,7 @@ mod tests {
                 reminder_type: "deadline".to_string(),
                 category: "university".to_string(),
                 checklist: vec!["draft".to_string()],
+                recurrence: None,
                 updated_at: "2026-05-22T13:00:00.000Z".to_string(),
             })
             .expect("reminder is edited");
@@ -789,6 +932,7 @@ mod tests {
             reminder_type: "main".to_string(),
             category: "not-a-category".to_string(),
             checklist: vec![],
+            recurrence: None,
             updated_at: "2026-05-22T13:00:00.000Z".to_string(),
         });
 
@@ -811,6 +955,133 @@ mod tests {
         assert!(store.delete_reminder("reminder-1").is_err());
     }
 
+    #[test]
+    fn round_trips_a_recurring_reminder() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        let mut reminder = sample_reminder("weekly-standup");
+        reminder.recurrence = Some(Recurrence {
+            freq: "weekly".to_string(),
+            interval: 1,
+            weekday: Some(1),
+            count: Some(6),
+        });
+
+        store.create_reminder(reminder).expect("created");
+        let read = store.list_reminders().expect("listed");
+
+        let rule = read[0].recurrence.as_ref().expect("recurrence persisted");
+        assert_eq!(rule.freq, "weekly");
+        assert_eq!(rule.interval, 1);
+        assert_eq!(rule.weekday, Some(1));
+        assert_eq!(rule.count, Some(6));
+    }
+
+    #[test]
+    fn advances_a_recurrence_to_the_next_occurrence() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        let mut reminder = sample_reminder("daily-water");
+        reminder.recurrence = Some(Recurrence {
+            freq: "daily".to_string(),
+            interval: 1,
+            weekday: None,
+            count: Some(3),
+        });
+        store.create_reminder(reminder).expect("created");
+
+        let advanced = store
+            .advance_reminder_recurrence(AdvanceRecurrencePatch {
+                id: "daily-water".to_string(),
+                scheduled_at: "2026-05-23T12:30:00.000Z".to_string(),
+                recurrence: Some(Recurrence {
+                    freq: "daily".to_string(),
+                    interval: 1,
+                    weekday: None,
+                    count: Some(2),
+                }),
+                updated_at: "2026-05-22T12:30:00.000Z".to_string(),
+            })
+            .expect("advanced");
+
+        assert_eq!(advanced.scheduled_at, "2026-05-23T12:30:00.000Z");
+        assert_eq!(advanced.status, "pending");
+        assert_eq!(advanced.completed_at, None);
+        assert_eq!(advanced.recurrence.expect("rule").count, Some(2));
+        assert_eq!(advanced.sync_version, 1);
+    }
+
+    #[test]
+    fn migrates_v1_table_by_adding_recurrence_column() {
+        // Simulate a v1 DB: reminder_nodes WITHOUT recurrence_json, a row, and a
+        // recorded version-1 migration. Then run migrate() and confirm the
+        // column is added and the existing row still loads.
+        let connection = Connection::open_in_memory().expect("opens");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                  version INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                );
+                CREATE TABLE reminder_nodes (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT,
+                  title TEXT NOT NULL,
+                  raw_input TEXT NOT NULL,
+                  description TEXT,
+                  scheduled_at TEXT NOT NULL,
+                  timezone TEXT NOT NULL,
+                  reminder_type TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  category TEXT NOT NULL,
+                  parent_id TEXT,
+                  previous_id TEXT,
+                  next_id TEXT,
+                  checklist_json TEXT NOT NULL,
+                  confidence REAL NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  snoozed_until TEXT,
+                  created_on_device_id TEXT NOT NULL,
+                  sync_version INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO schema_migrations (version, name) VALUES (1, 'base_reminder_nodes');
+                INSERT INTO reminder_nodes (
+                  id, title, raw_input, scheduled_at, timezone, reminder_type, status,
+                  category, checklist_json, confidence, created_at, updated_at,
+                  created_on_device_id, sync_version
+                ) VALUES (
+                  'legacy-1', 'Old reminder', 'in 30m old reminder',
+                  '2026-05-22T12:30:00.000Z', 'Asia/Jakarta', 'main', 'pending',
+                  'uncategorized', '["logs"]', 0.9, '2026-05-22T12:00:00.000Z',
+                  '2026-05-22T12:00:00.000Z', 'device-1', 0
+                );
+                "#,
+            )
+            .expect("v1 schema seeded");
+
+        let store = ReminderStore {
+            connection,
+            database_path: PathBuf::from(":memory:"),
+        };
+        assert!(!store
+            .column_exists("reminder_nodes", "recurrence_json")
+            .expect("checks column"));
+
+        store.migrate().expect("migration runs");
+
+        assert!(store
+            .column_exists("reminder_nodes", "recurrence_json")
+            .expect("checks column"));
+        assert_eq!(store.schema_version().expect("version"), 2);
+
+        let reminders = store.list_reminders().expect("legacy row still loads");
+        assert_eq!(reminders.len(), 1);
+        assert_eq!(reminders[0].id, "legacy-1");
+        assert!(reminders[0].recurrence.is_none());
+    }
+
     fn sample_reminder(id: &str) -> ReminderNode {
         ReminderNode {
             id: id.to_string(),
@@ -827,6 +1098,7 @@ mod tests {
             previous_id: None,
             next_id: None,
             checklist: vec!["logs".to_string()],
+            recurrence: None,
             confidence: 0.9,
             created_at: "2026-05-22T12:00:00.000Z".to_string(),
             updated_at: "2026-05-22T12:00:00.000Z".to_string(),

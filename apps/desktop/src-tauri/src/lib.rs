@@ -4,7 +4,9 @@ mod shortcut;
 
 use std::sync::Mutex;
 
-use data::{ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore};
+use data::{
+    AdvanceRecurrencePatch, ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore,
+};
 use tauri::{LogicalSize, Manager};
 
 struct AppState {
@@ -81,6 +83,19 @@ fn delete_reminder_node(state: tauri::State<'_, AppState>, id: String) -> Result
         .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
 
     store.delete_reminder(&id)
+}
+
+#[tauri::command]
+fn advance_reminder_recurrence(
+    state: tauri::State<'_, AppState>,
+    patch: AdvanceRecurrencePatch,
+) -> Result<ReminderNode, String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.advance_reminder_recurrence(patch)
 }
 
 #[tauri::command]
@@ -189,6 +204,7 @@ pub fn run() {
             update_reminder_node_status,
             update_reminder_node,
             delete_reminder_node,
+            advance_reminder_recurrence,
             get_local_database_path,
             get_local_schema_version,
             show_main_window,

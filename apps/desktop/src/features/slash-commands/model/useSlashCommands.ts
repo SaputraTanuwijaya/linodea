@@ -92,7 +92,12 @@ export function useSlashCommands(
 
   const applyCommand = useCallback(
     (suggestion: SlashCommandSuggestion): SlashApplyResult => {
-      const insert = `/${suggestion.command.name} `;
+      // Action commands insert a scaffold template (e.g. "every "); parse
+      // modifiers insert the `/name ` keyword the parser acts on.
+      const insert =
+        suggestion.command.kind === "action" && suggestion.command.template
+          ? suggestion.command.template
+          : `/${suggestion.command.name} `;
       return {
         value: value.slice(0, start) + insert + value.slice(end),
         caret: start + insert.length,
