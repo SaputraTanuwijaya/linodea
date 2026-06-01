@@ -15,10 +15,14 @@
  * link/reorder/arrange (that would make it a calendar).
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { listReminderChains, setReminderCategory } from "@/entities/reminder";
+import {
+  deleteReminderNode,
+  listReminderChains,
+  setReminderCategory,
+} from "@/entities/reminder";
 import { categoryColor } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import { formatDateTime, isTauriRuntime } from "@/shared/lib";
@@ -59,6 +63,22 @@ function flattenChains(roots: ChainNode[]): FlatRow[] {
   return rows;
 }
 
+/** Every done/cancelled node id across the whole forest (all depths). These
+ * are the rows shown dimmed + struck through; "Clear completed" removes them.
+ * Pending descendants are NOT collected — the chain-aware delete promotes them
+ * into the gap, so clearing a finished parent never drops an active child. */
+function collectClearableIds(roots: ChainNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (chain: ChainNode) => {
+    if (chain.node.status === "done" || chain.node.status === "cancelled") {
+      ids.push(chain.node.id);
+    }
+    chain.children.forEach(walk);
+  };
+  roots.forEach(walk);
+  return ids;
+}
+
 const laneX = (depth: number) => BASE_X + depth * INDENT;
 const rowY = (index: number) => index * ROW_H + ROW_H / 2;
 
@@ -77,8 +97,11 @@ export function ChainPage({
 }) {
   const [chains, setChains] = useState<ChainNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [categoryMenu, setCategoryMenu] = useState<CategoryMenuState | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const clearableIds = useMemo(() => collectClearableIds(chains), [chains]);
 
   const refresh = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -121,6 +144,22 @@ export function ChainPage({
     setCategoryMenu({ id, x: rect.left, y: rect.bottom + 4 });
   }
 
+  async function clearCompleted() {
+    if (!isTauriRuntime() || clearableIds.length === 0 || isClearing) return;
+    setIsClearing(true);
+    try {
+      // Delete by stable id; each delete re-stitches the chain (Rust owns it).
+      for (const id of clearableIds) {
+        await deleteReminderNode(id);
+      }
+      await refresh();
+    } catch {
+      // Silent.
+    } finally {
+      setIsClearing(false);
+    }
+  }
+
   async function pickCategory(category: ReminderCategory) {
     if (!categoryMenu) return;
     const id = categoryMenu.id;
@@ -146,10 +185,20 @@ export function ChainPage({
 
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
-      <header className="mb-2 px-1">
+      <header className="mb-2 flex items-center justify-between px-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-[var(--lin-text-dim)]">
           {strings.chain.queued}
         </p>
+        {clearableIds.length > 0 ? (
+          <button
+            className="flex-none rounded-md px-2 py-0.5 text-xs text-[var(--lin-text-mute)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)] disabled:opacity-50"
+            disabled={isClearing}
+            onClick={() => void clearCompleted()}
+            type="button"
+          >
+            {strings.chain.clear} ({clearableIds.length})
+          </button>
+        ) : null}
       </header>
       {isLoading && sections.length === 0 ? (
         <p className="px-1 py-6 text-center text-sm text-[var(--lin-text-mute)]">

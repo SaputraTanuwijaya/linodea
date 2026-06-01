@@ -19,6 +19,18 @@ body,
   background: transparent;
 }
 
+/* Hide scrollbars app-wide. This is a minimal, least-distraction popup UI;
+   the visual scroll track is noise. Scrolling still works fully (wheel,
+   trackpad, keyboard) — only the bar is hidden. Covers WebView2/Chromium +
+   WebKit (::-webkit-scrollbar) and Gecko/legacy Edge (the two properties). */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
 /* ---------------------------------------------------------------
    Theme tokens.
 
