@@ -5,7 +5,8 @@ mod shortcut;
 use std::sync::Mutex;
 
 use data::{
-    AdvanceRecurrencePatch, ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore,
+    AdvanceRecurrencePatch, ChainNode, MovePatch, ReminderEditPatch, ReminderNode,
+    ReminderStatusPatch, ReminderStore,
 };
 use tauri::{LogicalSize, Manager};
 
@@ -76,6 +77,29 @@ fn update_reminder_node(
 }
 
 #[tauri::command]
+fn move_reminder_node(
+    state: tauri::State<'_, AppState>,
+    patch: MovePatch,
+) -> Result<ReminderNode, String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.move_reminder(patch)
+}
+
+#[tauri::command]
+fn list_reminder_chains(state: tauri::State<'_, AppState>) -> Result<Vec<ChainNode>, String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.list_reminder_chains()
+}
+
+#[tauri::command]
 fn delete_reminder_node(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
     let store = state
         .reminders
@@ -136,6 +160,11 @@ fn enter_capture_mode(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn enter_list_mode(app: tauri::AppHandle) -> Result<(), String> {
     desktop::show_list_mode(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn enter_chain_mode(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_chain_mode(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -203,6 +232,8 @@ pub fn run() {
             list_due_reminder_nodes,
             update_reminder_node_status,
             update_reminder_node,
+            move_reminder_node,
+            list_reminder_chains,
             delete_reminder_node,
             advance_reminder_recurrence,
             get_local_database_path,
@@ -211,6 +242,7 @@ pub fn run() {
             hide_main_window,
             enter_capture_mode,
             enter_list_mode,
+            enter_chain_mode,
             enter_settings_mode,
             set_popup_height,
             show_alert,

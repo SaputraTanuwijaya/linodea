@@ -84,6 +84,17 @@ export interface ReminderNode {
   syncVersion: number;
 }
 
+/**
+ * A reminder plus its ordered children, recursively — the assembled chain
+ * forest the chain view renders. Mirrors the Rust `ChainNode` returned by
+ * `list_reminder_chains`: roots and each child group are ordered by their
+ * previous/next links.
+ */
+export interface ChainNode {
+  node: ReminderNode;
+  children: ChainNode[];
+}
+
 export type ReminderPatch = Partial<
   Pick<
     ReminderNode,

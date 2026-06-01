@@ -35,6 +35,7 @@ import { usePrealerts } from "@/features/prealerts";
 import { useAutostart } from "@/features/startup";
 import { useTheme } from "@/features/theme";
 import { CapturePage } from "@/pages/capture";
+import { ChainPage } from "@/pages/chain";
 import { ListPage } from "@/pages/list";
 import { SettingsPage } from "@/pages/settings";
 import { stringsFor } from "@/shared/i18n";
@@ -49,7 +50,7 @@ import {
 const MODE_EVENT = "linodea:mode";
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
-type Mode = "capture" | "list" | "settings";
+type Mode = "capture" | "list" | "chain" | "settings";
 
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -200,6 +201,9 @@ function App() {
         case "list":
           await invoke("enter_list_mode");
           break;
+        case "chain":
+          await invoke("enter_chain_mode");
+          break;
         case "settings":
           await invoke("enter_settings_mode");
           break;
@@ -251,6 +255,10 @@ function App() {
           />
         ) : null}
 
+        {mode === "chain" ? (
+          <ChainPage refreshKey={listRefreshKey} strings={strings} />
+        ) : null}
+
         {mode === "settings" ? (
           <SettingsPage bundle={settingsBundle} />
         ) : null}
@@ -271,6 +279,7 @@ function App() {
 
 function parseMode(payload: string): Mode {
   if (payload === "list") return "list";
+  if (payload === "chain") return "chain";
   if (payload === "settings") return "settings";
   return "capture";
 }

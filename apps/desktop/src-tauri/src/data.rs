@@ -1,6 +1,7 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -141,6 +142,30 @@ pub struct AdvanceRecurrencePatch {
     pub scheduled_at: String,
     pub recurrence: Option<Recurrence>,
     pub updated_at: String,
+}
+
+/// Re-position a node within the chain forest: place it under `parent_id`
+/// (None = a top-level root) immediately after sibling `after_id` (None = the
+/// head of that sibling group). One primitive covers link, unlink (parent =
+/// None), and reorder — and it is the write op a future AI chain editor would
+/// call to push/pop/alter the parent/previous/next structure.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovePatch {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub after_id: Option<String>,
+    pub updated_at: String,
+}
+
+/// A node plus its ordered children, recursively. The assembled shape the
+/// chain view renders (GitHub-commit style). Roots and each child group are
+/// ordered by their previous/next links.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChainNode {
+    pub node: ReminderNode,
+    pub children: Vec<ChainNode>,
 }
 
 pub struct ReminderStore {
@@ -476,20 +501,166 @@ impl ReminderStore {
             .ok_or_else(|| "Reminder was advanced but could not be read back.".to_string())
     }
 
+    /// Re-position a node within the chain forest. Transactional: detaches the
+    /// node from its current sibling group, then splices it into the target
+    /// group, keeping every group a consistent doubly-linked list. Rejects
+    /// self-parenting, parent cycles, and an `after` sibling that lives in a
+    /// different group.
+    pub fn move_reminder(&self, patch: MovePatch) -> Result<ReminderNode, String> {
+        if patch.id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+        if patch.updated_at.trim().is_empty() {
+            return Err("Reminder update time is required.".to_string());
+        }
+
+        let tx = self
+            .connection
+            .unchecked_transaction()
+            .map_err(to_store_error)?;
+
+        let current =
+            fetch_links(&tx, &patch.id)?.ok_or_else(|| "Reminder was not found.".to_string())?;
+
+        if let Some(parent) = patch.parent_id.as_deref() {
+            if parent == patch.id {
+                return Err("A reminder cannot be its own parent.".to_string());
+            }
+            if fetch_links(&tx, parent)?.is_none() {
+                return Err("Parent reminder was not found.".to_string());
+            }
+            if is_descendant(&tx, &patch.id, parent)? {
+                return Err("That move would create a cycle.".to_string());
+            }
+        }
+
+        if let Some(after) = patch.after_id.as_deref() {
+            if after == patch.id {
+                return Err("A reminder cannot be placed after itself.".to_string());
+            }
+            let after_links = fetch_links(&tx, after)?
+                .ok_or_else(|| "Sibling reminder was not found.".to_string())?;
+            if after_links.parent.as_deref() != patch.parent_id.as_deref() {
+                return Err("The sibling is not in the target group.".to_string());
+            }
+        }
+
+        // 1. Detach from the current position, stitching old neighbors together.
+        if let Some(previous) = current.previous.as_deref() {
+            set_link(
+                &tx,
+                previous,
+                "next_id",
+                current.next.as_deref(),
+                &patch.updated_at,
+            )?;
+        }
+        if let Some(next) = current.next.as_deref() {
+            set_link(
+                &tx,
+                next,
+                "previous_id",
+                current.previous.as_deref(),
+                &patch.updated_at,
+            )?;
+        }
+
+        // 2. Find the node's new neighbors in the target group.
+        let (new_previous, new_next) = match patch.after_id.as_deref() {
+            Some(after) => {
+                let after_next = fetch_links(&tx, after)?.and_then(|links| links.next);
+                (Some(after.to_string()), after_next)
+            }
+            None => (
+                None,
+                group_head(&tx, patch.parent_id.as_deref(), &patch.id)?,
+            ),
+        };
+
+        // 3. Wire the node in and fix the neighbors that now point at it.
+        set_all_links(
+            &tx,
+            &patch.id,
+            patch.parent_id.as_deref(),
+            new_previous.as_deref(),
+            new_next.as_deref(),
+            &patch.updated_at,
+        )?;
+        if let Some(previous) = new_previous.as_deref() {
+            set_link(&tx, previous, "next_id", Some(&patch.id), &patch.updated_at)?;
+        }
+        if let Some(next) = new_next.as_deref() {
+            set_link(&tx, next, "previous_id", Some(&patch.id), &patch.updated_at)?;
+        }
+
+        tx.commit().map_err(to_store_error)?;
+
+        self.get_reminder_by_id(&patch.id)?
+            .ok_or_else(|| "Reminder was moved but could not be read back.".to_string())
+    }
+
+    /// Assemble every node into its nested chain forest. Defensive against
+    /// inconsistent data: a parent pointing at a missing node surfaces the
+    /// child at root, and broken or cyclic previous/next links can neither
+    /// drop a node nor loop forever.
+    pub fn list_reminder_chains(&self) -> Result<Vec<ChainNode>, String> {
+        Ok(assemble_chains(self.list_reminders()?))
+    }
+
+    /// Delete a node and keep the forest consistent: stitch its sibling
+    /// neighbors, and promote its direct children into its slot (re-parented
+    /// to the deleted node's parent, spliced in their existing order).
     pub fn delete_reminder(&self, id: &str) -> Result<(), String> {
         if id.trim().is_empty() {
             return Err("Reminder id is required.".to_string());
         }
 
-        let changed = self
+        let tx = self
             .connection
-            .execute("DELETE FROM reminder_nodes WHERE id = ?1", params![id])
+            .unchecked_transaction()
             .map_err(to_store_error)?;
 
+        let current = fetch_links(&tx, id)?.ok_or_else(|| "Reminder was not found.".to_string())?;
+        let stamp = now_iso(&tx)?;
+        let children = ordered_children(&tx, id)?;
+        let left = current.previous.as_deref();
+        let right = current.next.as_deref();
+
+        if children.is_empty() {
+            // No children: just close the gap the node leaves behind.
+            if let Some(previous) = left {
+                set_link(&tx, previous, "next_id", right, &stamp)?;
+            }
+            if let Some(next) = right {
+                set_link(&tx, next, "previous_id", left, &stamp)?;
+            }
+        } else {
+            let first = children.first().expect("children is non-empty").clone();
+            let last = children.last().expect("children is non-empty").clone();
+
+            // Re-parent the promoted children; their internal order is preserved.
+            for child in &children {
+                set_link(&tx, child, "parent_id", current.parent.as_deref(), &stamp)?;
+            }
+            // Splice the children run between the deleted node's neighbors.
+            set_link(&tx, &first, "previous_id", left, &stamp)?;
+            set_link(&tx, &last, "next_id", right, &stamp)?;
+            if let Some(previous) = left {
+                set_link(&tx, previous, "next_id", Some(&first), &stamp)?;
+            }
+            if let Some(next) = right {
+                set_link(&tx, next, "previous_id", Some(&last), &stamp)?;
+            }
+        }
+
+        let changed = tx
+            .execute("DELETE FROM reminder_nodes WHERE id = ?1", params![id])
+            .map_err(to_store_error)?;
         if changed == 0 {
             return Err("Reminder was not found.".to_string());
         }
 
+        tx.commit().map_err(to_store_error)?;
         Ok(())
     }
 
@@ -769,6 +940,260 @@ fn serialize_recurrence(recurrence: &Option<Recurrence>) -> Result<Option<String
             .map_err(to_store_error),
         None => Ok(None),
     }
+}
+
+/// The three chain pointers of a single node.
+struct NodeLinks {
+    parent: Option<String>,
+    previous: Option<String>,
+    next: Option<String>,
+}
+
+/// Read a node's chain pointers, or `None` if the node does not exist.
+fn fetch_links(connection: &Connection, id: &str) -> Result<Option<NodeLinks>, String> {
+    connection
+        .query_row(
+            "SELECT parent_id, previous_id, next_id FROM reminder_nodes WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(NodeLinks {
+                    parent: row.get(0)?,
+                    previous: row.get(1)?,
+                    next: row.get(2)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(to_store_error)
+}
+
+/// Set a single chain-pointer column on a node, bumping its sync bookkeeping.
+/// `column` is always an internal constant — never user input.
+fn set_link(
+    connection: &Connection,
+    id: &str,
+    column: &str,
+    value: Option<&str>,
+    updated_at: &str,
+) -> Result<(), String> {
+    let sql = format!(
+        "UPDATE reminder_nodes SET {column} = ?2, updated_at = ?3, sync_version = sync_version + 1 WHERE id = ?1"
+    );
+    connection
+        .execute(&sql, params![id, value, updated_at])
+        .map(|_| ())
+        .map_err(to_store_error)
+}
+
+/// Set all three chain pointers on a node at once.
+fn set_all_links(
+    connection: &Connection,
+    id: &str,
+    parent: Option<&str>,
+    previous: Option<&str>,
+    next: Option<&str>,
+    updated_at: &str,
+) -> Result<(), String> {
+    connection
+        .execute(
+            r#"
+            UPDATE reminder_nodes
+            SET parent_id = ?2, previous_id = ?3, next_id = ?4,
+                updated_at = ?5, sync_version = sync_version + 1
+            WHERE id = ?1
+            "#,
+            params![id, parent, previous, next, updated_at],
+        )
+        .map(|_| ())
+        .map_err(to_store_error)
+}
+
+/// The head (previous_id IS NULL) of a sibling group, ignoring `exclude_id`
+/// (the node mid-move, whose stale pointers must not be picked).
+fn group_head(
+    connection: &Connection,
+    parent: Option<&str>,
+    exclude_id: &str,
+) -> Result<Option<String>, String> {
+    let result = match parent {
+        Some(parent) => connection.query_row(
+            "SELECT id FROM reminder_nodes WHERE parent_id = ?1 AND previous_id IS NULL AND id != ?2 LIMIT 1",
+            params![parent, exclude_id],
+            |row| row.get(0),
+        ),
+        None => connection.query_row(
+            "SELECT id FROM reminder_nodes WHERE parent_id IS NULL AND previous_id IS NULL AND id != ?1 LIMIT 1",
+            params![exclude_id],
+            |row| row.get(0),
+        ),
+    };
+    result.optional().map_err(to_store_error)
+}
+
+/// Whether `ancestor` is found walking up the parent chain from `start`.
+/// Guarded against a pre-existing parent cycle so it always terminates.
+fn is_descendant(connection: &Connection, ancestor: &str, start: &str) -> Result<bool, String> {
+    let mut cursor = Some(start.to_string());
+    let mut guard = 0;
+    while let Some(current) = cursor {
+        if current == ancestor {
+            return Ok(true);
+        }
+        guard += 1;
+        if guard > 10_000 {
+            break;
+        }
+        cursor = fetch_links(connection, &current)?.and_then(|links| links.parent);
+    }
+    Ok(false)
+}
+
+/// A fresh ISO-8601 UTC timestamp, matching the format the JS side sends, used
+/// for the structural pointer updates a delete makes to neighbors/children.
+fn now_iso(connection: &Connection) -> Result<String, String> {
+    connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get(0)
+        })
+        .map_err(to_store_error)
+}
+
+/// The ids of a node's direct children, in their linked order.
+fn ordered_children(connection: &Connection, parent_id: &str) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare("SELECT id, previous_id, next_id FROM reminder_nodes WHERE parent_id = ?1")
+        .map_err(to_store_error)?;
+    let rows = statement
+        .query_map(params![parent_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(to_store_error)?;
+
+    let mut members = Vec::new();
+    let mut links: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for row in rows {
+        let (id, previous, next) = row.map_err(to_store_error)?;
+        members.push(id.clone());
+        links.insert(id, (previous, next));
+    }
+
+    Ok(order_group_ids(&members, &links))
+}
+
+/// Order the ids of one sibling group by walking each chain head along its
+/// `next` links. Defensive: nodes left out by broken or cyclic links are
+/// appended in input order so none are ever dropped.
+fn order_group_ids(
+    members: &[String],
+    links: &HashMap<String, (Option<String>, Option<String>)>,
+) -> Vec<String> {
+    let member_set: HashSet<&str> = members.iter().map(String::as_str).collect();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut ordered = Vec::with_capacity(members.len());
+
+    for candidate in members {
+        let previous = links
+            .get(candidate)
+            .and_then(|(previous, _)| previous.as_deref());
+        let is_head = match previous {
+            None => true,
+            Some(previous) => !member_set.contains(previous),
+        };
+        if !is_head {
+            continue;
+        }
+        let mut cursor = Some(candidate.clone());
+        while let Some(current) = cursor {
+            if !visited.insert(current.clone()) {
+                break;
+            }
+            ordered.push(current.clone());
+            cursor = links
+                .get(&current)
+                .and_then(|(_, next)| next.clone())
+                .filter(|next| member_set.contains(next.as_str()) && !visited.contains(next));
+        }
+    }
+
+    for candidate in members {
+        if visited.insert(candidate.clone()) {
+            ordered.push(candidate.clone());
+        }
+    }
+
+    ordered
+}
+
+/// Build the nested chain forest from a flat node list. Pure (no DB), so the
+/// ordering and defensive rules are unit-testable on crafted inputs.
+fn assemble_chains(nodes: Vec<ReminderNode>) -> Vec<ChainNode> {
+    let order: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
+    let mut index: HashMap<String, ReminderNode> = HashMap::with_capacity(nodes.len());
+    for node in nodes {
+        index.insert(node.id.clone(), node);
+    }
+
+    let present: HashSet<String> = index.keys().cloned().collect();
+    let mut groups: HashMap<Option<String>, Vec<String>> = HashMap::new();
+    let mut links: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    for id in &order {
+        let node = &index[id];
+        // A parent pointing at a missing node is treated as a root.
+        let parent = match node.parent_id.as_deref() {
+            Some(parent) if present.contains(parent) => Some(parent.to_string()),
+            _ => None,
+        };
+        groups.entry(parent).or_default().push(id.clone());
+        links.insert(id.clone(), (node.previous_id.clone(), node.next_id.clone()));
+    }
+
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut roots = build_chain_level(None, &groups, &links, &index, &mut visited);
+
+    // Salvage any node trapped under a parent cycle (e.g. self-parent) so the
+    // forest still contains every node exactly once.
+    for id in &order {
+        if visited.insert(id.clone()) {
+            let children = build_chain_level(Some(id), &groups, &links, &index, &mut visited);
+            roots.push(ChainNode {
+                node: index[id].clone(),
+                children,
+            });
+        }
+    }
+
+    roots
+}
+
+fn build_chain_level(
+    parent: Option<&str>,
+    groups: &HashMap<Option<String>, Vec<String>>,
+    links: &HashMap<String, (Option<String>, Option<String>)>,
+    index: &HashMap<String, ReminderNode>,
+    visited: &mut HashSet<String>,
+) -> Vec<ChainNode> {
+    let key = parent.map(|parent| parent.to_string());
+    let members = match groups.get(&key) {
+        Some(members) => members,
+        None => return Vec::new(),
+    };
+
+    let mut level = Vec::new();
+    for id in order_group_ids(members, links) {
+        if !visited.insert(id.clone()) {
+            continue;
+        }
+        let children = build_chain_level(Some(&id), groups, links, index, visited);
+        level.push(ChainNode {
+            node: index[&id].clone(),
+            children,
+        });
+    }
+    level
 }
 
 #[cfg(test)]
@@ -1080,6 +1505,248 @@ mod tests {
         assert_eq!(reminders.len(), 1);
         assert_eq!(reminders[0].id, "legacy-1");
         assert!(reminders[0].recurrence.is_none());
+    }
+
+    const MOVE_STAMP: &str = "2026-05-22T13:00:00.000Z";
+
+    fn move_patch(id: &str, parent: Option<&str>, after: Option<&str>) -> MovePatch {
+        MovePatch {
+            id: id.to_string(),
+            parent_id: parent.map(str::to_string),
+            after_id: after.map(str::to_string),
+            updated_at: MOVE_STAMP.to_string(),
+        }
+    }
+
+    fn seed(store: &ReminderStore, ids: &[&str]) {
+        for id in ids {
+            store
+                .create_reminder(sample_reminder(id))
+                .expect("reminder is created");
+        }
+    }
+
+    /// Flatten one assembled level into `(id, child_ids)` pairs for assertions.
+    fn level(chains: &[ChainNode]) -> Vec<(String, Vec<String>)> {
+        chains
+            .iter()
+            .map(|chain| {
+                (
+                    chain.node.id.clone(),
+                    chain.children.iter().map(|c| c.node.id.clone()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn moves_a_reminder_under_a_parent_and_nests_it() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["main", "prep"]);
+
+        store
+            .move_reminder(move_patch("prep", Some("main"), None))
+            .expect("prep nests under main");
+
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].node.id, "main");
+        let children: Vec<_> = chains[0]
+            .children
+            .iter()
+            .map(|c| c.node.id.clone())
+            .collect();
+        assert_eq!(children, vec!["prep"]);
+    }
+
+    #[test]
+    fn orders_and_reorders_siblings() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["p", "c1", "c2", "c3"]);
+
+        store
+            .move_reminder(move_patch("c1", Some("p"), None))
+            .expect("c1");
+        store
+            .move_reminder(move_patch("c2", Some("p"), Some("c1")))
+            .expect("c2");
+        store
+            .move_reminder(move_patch("c3", Some("p"), Some("c2")))
+            .expect("c3");
+
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        let children: Vec<_> = chains[0]
+            .children
+            .iter()
+            .map(|c| c.node.id.clone())
+            .collect();
+        assert_eq!(children, vec!["c1", "c2", "c3"]);
+
+        // Move c3 to the head of the group.
+        store
+            .move_reminder(move_patch("c3", Some("p"), None))
+            .expect("reorder");
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        let children: Vec<_> = chains[0]
+            .children
+            .iter()
+            .map(|c| c.node.id.clone())
+            .collect();
+        assert_eq!(children, vec!["c3", "c1", "c2"]);
+    }
+
+    #[test]
+    fn moving_to_root_detaches_from_the_parent() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["main", "prep"]);
+        store
+            .move_reminder(move_patch("prep", Some("main"), None))
+            .expect("nest");
+
+        store
+            .move_reminder(move_patch("prep", None, None))
+            .expect("unlink to root");
+
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        assert_eq!(chains.len(), 2);
+        assert!(chains.iter().all(|chain| chain.children.is_empty()));
+    }
+
+    #[test]
+    fn rejects_self_parenting() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["x"]);
+        assert!(store
+            .move_reminder(move_patch("x", Some("x"), None))
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_a_parent_cycle() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["p", "c"]);
+        store
+            .move_reminder(move_patch("c", Some("p"), None))
+            .expect("nest c under p");
+
+        // Making p a child of its own descendant c would cycle.
+        assert!(store
+            .move_reminder(move_patch("p", Some("c"), None))
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_after_sibling_from_a_different_group() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["a", "b", "c"]);
+        store
+            .move_reminder(move_patch("b", Some("a"), None))
+            .expect("b under a");
+
+        // c at root cannot be placed after b, which lives under a.
+        assert!(store
+            .move_reminder(move_patch("c", None, Some("b")))
+            .is_err());
+    }
+
+    #[test]
+    fn delete_promotes_children_into_the_gap() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["r1", "p", "r2", "c1", "c2"]);
+        // Root chain: r1 -> p -> r2.
+        store
+            .move_reminder(move_patch("p", None, Some("r1")))
+            .expect("p after r1");
+        store
+            .move_reminder(move_patch("r2", None, Some("p")))
+            .expect("r2 after p");
+        // p's children: c1 -> c2.
+        store
+            .move_reminder(move_patch("c1", Some("p"), None))
+            .expect("c1 under p");
+        store
+            .move_reminder(move_patch("c2", Some("p"), Some("c1")))
+            .expect("c2 under p");
+
+        store.delete_reminder("p").expect("p is deleted");
+
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        assert_eq!(
+            level(&chains),
+            vec![
+                ("r1".to_string(), vec![]),
+                ("c1".to_string(), vec![]),
+                ("c2".to_string(), vec![]),
+                ("r2".to_string(), vec![]),
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_stitches_sibling_links() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        seed(&store, &["a", "b", "c"]);
+        store
+            .move_reminder(move_patch("b", None, Some("a")))
+            .expect("a -> b");
+        store
+            .move_reminder(move_patch("c", None, Some("b")))
+            .expect("b -> c");
+
+        store.delete_reminder("b").expect("b is deleted");
+
+        let chains = store.list_reminder_chains().expect("chains assemble");
+        let ids: Vec<_> = chains.iter().map(|chain| chain.node.id.clone()).collect();
+        assert_eq!(ids, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn assembly_orders_by_links_not_schedule() {
+        // b is scheduled before a, but the links say a -> b.
+        let mut a = sample_reminder("a");
+        a.next_id = Some("b".to_string());
+        a.scheduled_at = "2026-05-22T15:00:00.000Z".to_string();
+        let mut b = sample_reminder("b");
+        b.previous_id = Some("a".to_string());
+        b.scheduled_at = "2026-05-22T09:00:00.000Z".to_string();
+
+        let chains = assemble_chains(vec![b, a]);
+        let ids: Vec<_> = chains.iter().map(|chain| chain.node.id.clone()).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn assembly_surfaces_an_orphan_at_root() {
+        let mut child = sample_reminder("child");
+        child.parent_id = Some("ghost".to_string());
+
+        let chains = assemble_chains(vec![child]);
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].node.id, "child");
+    }
+
+    #[test]
+    fn assembly_is_defensive_against_a_link_cycle() {
+        let mut a = sample_reminder("a");
+        a.next_id = Some("b".to_string());
+        let mut b = sample_reminder("b");
+        b.previous_id = Some("a".to_string());
+        b.next_id = Some("a".to_string()); // cycle back to a
+
+        let chains = assemble_chains(vec![a, b]);
+        let ids: Vec<_> = chains.iter().map(|chain| chain.node.id.clone()).collect();
+        assert_eq!(ids, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn assembly_salvages_a_self_parented_node() {
+        let mut x = sample_reminder("x");
+        x.parent_id = Some("x".to_string());
+
+        let chains = assemble_chains(vec![x]);
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].node.id, "x");
+        assert!(chains[0].children.is_empty());
     }
 
     fn sample_reminder(id: &str) -> ReminderNode {

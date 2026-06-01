@@ -6,10 +6,13 @@ export {
   advanceReminderRecurrence,
   createReminderNodeCommand,
   deleteReminderNode,
+  listReminderChains,
   listReminderNodes,
+  moveReminderNode,
   updateReminderNode,
   updateReminderNodeStatus,
   type AdvanceRecurrencePatch,
+  type MovePatch,
   type ReminderEditPatch,
   type ReminderStatusPatch,
 } from "./api/commands";

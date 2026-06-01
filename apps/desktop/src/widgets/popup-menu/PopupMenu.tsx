@@ -10,17 +10,17 @@ import type { RefObject } from "react";
 
 import type { Strings } from "@/shared/i18n";
 
-export type MenuAction = "capture" | "list" | "settings" | "hide" | "quit";
+export type MenuAction = "capture" | "list" | "chain" | "settings" | "hide" | "quit";
 
 export interface MenuAnchor {
   x: number;
   y: number;
 }
 
-export type PopupMenuMode = "capture" | "list" | "settings";
+export type PopupMenuMode = "capture" | "list" | "chain" | "settings";
 
 const MENU_WIDTH = 200;
-const MENU_HEIGHT = 220;
+const MENU_HEIGHT = 256;
 
 export function PopupMenu({
   anchor,
@@ -53,6 +53,11 @@ export function PopupMenu({
         disabled={mode === "list"}
         label={strings.menu.reminders}
         onClick={() => onAction("list")}
+      />
+      <MenuItem
+        disabled={mode === "chain"}
+        label={strings.menu.chains}
+        onClick={() => onAction("chain")}
       />
       <MenuItem
         disabled={mode === "settings"}

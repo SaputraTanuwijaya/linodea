@@ -24,6 +24,7 @@ export interface Strings {
   menu: {
     capture: string;
     reminders: string;
+    chains: string;
     settings: string;
     hide: string;
     quit: string;
@@ -48,6 +49,19 @@ export interface Strings {
     snooze10m: string;
     snooze1h: string;
     snoozeTomorrow: string;
+  };
+  chain: {
+    queued: string;
+    empty: string;
+  };
+  category: {
+    university: string;
+    investing: string;
+    personal: string;
+    tutoring: string;
+    urgent: string;
+    waiting: string;
+    uncategorized: string;
   };
   settings: {
     appearance: { title: string; hint: string };
@@ -105,6 +119,7 @@ const STRINGS: Record<LanguageId, Strings> = {
     menu: {
       capture: "Quick capture",
       reminders: "Reminders",
+      chains: "Chains",
       settings: "Settings",
       hide: "Hide",
       quit: "Quit",
@@ -129,6 +144,19 @@ const STRINGS: Record<LanguageId, Strings> = {
       snooze10m: "+10 min",
       snooze1h: "+1 hour",
       snoozeTomorrow: "Tomorrow 9am",
+    },
+    chain: {
+      queued: "Chains",
+      empty: "No reminders yet. Capture a few and they'll group here by category.",
+    },
+    category: {
+      university: "University",
+      investing: "Investing",
+      personal: "Personal",
+      tutoring: "Tutoring",
+      urgent: "Urgent",
+      waiting: "Waiting",
+      uncategorized: "Uncategorized",
     },
     settings: {
       appearance: {
@@ -194,6 +222,7 @@ const STRINGS: Record<LanguageId, Strings> = {
     menu: {
       capture: "Tangkap cepat",
       reminders: "Pengingat",
+      chains: "Rantai",
       settings: "Pengaturan",
       hide: "Sembunyikan",
       quit: "Keluar",
@@ -218,6 +247,19 @@ const STRINGS: Record<LanguageId, Strings> = {
       snooze10m: "+10 mnt",
       snooze1h: "+1 jam",
       snoozeTomorrow: "Besok jam 9",
+    },
+    chain: {
+      queued: "Rantai",
+      empty: "Belum ada pengingat. Tangkap beberapa dan akan dikelompokkan di sini per kategori.",
+    },
+    category: {
+      university: "Kuliah",
+      investing: "Investasi",
+      personal: "Pribadi",
+      tutoring: "Les",
+      urgent: "Mendesak",
+      waiting: "Menunggu",
+      uncategorized: "Tanpa kategori",
     },
     settings: {
       appearance: {

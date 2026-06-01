@@ -17,17 +17,20 @@ const BOTTOM_RIGHT_MARGIN: f64 = 16.0;
 const BOTTOM_RIGHT_SLACK: f64 = 48.0;
 const TRAY_MENU_CAPTURE: &str = "show_capture";
 const TRAY_MENU_REMINDERS: &str = "show_reminders";
+const TRAY_MENU_CHAINS: &str = "show_chains";
 const TRAY_MENU_SETTINGS: &str = "show_settings";
 const TRAY_MENU_HIDE: &str = "hide_main_window";
 const TRAY_MENU_QUIT: &str = "quit_app";
 
 const CAPTURE_SIZE: (f64, f64) = (620.0, 130.0);
 const LIST_SIZE: (f64, f64) = (620.0, 420.0);
+const CHAIN_SIZE: (f64, f64) = (620.0, 420.0);
 const SETTINGS_SIZE: (f64, f64) = (620.0, 660.0);
 
 const MODE_EVENT: &str = "linodea:mode";
 const MODE_CAPTURE: &str = "capture";
 const MODE_LIST: &str = "list";
+const MODE_CHAIN: &str = "chain";
 const MODE_SETTINGS: &str = "settings";
 
 pub fn setup_desktop_integration(app: &mut App) -> tauri::Result<()> {
@@ -42,6 +45,10 @@ pub fn show_capture_mode(app: &AppHandle) -> tauri::Result<()> {
 
 pub fn show_list_mode(app: &AppHandle) -> tauri::Result<()> {
     show_in_mode(app, LIST_SIZE, MODE_LIST)
+}
+
+pub fn show_chain_mode(app: &AppHandle) -> tauri::Result<()> {
+    show_in_mode(app, CHAIN_SIZE, MODE_CHAIN)
 }
 
 pub fn show_settings_mode(app: &AppHandle) -> tauri::Result<()> {
@@ -167,6 +174,7 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .text(TRAY_MENU_CAPTURE, "Quick capture")
         .text(TRAY_MENU_REMINDERS, "Reminders")
+        .text(TRAY_MENU_CHAINS, "Chains")
         .text(TRAY_MENU_SETTINGS, "Settings")
         .text(TRAY_MENU_HIDE, "Hide")
         .separator()
@@ -183,6 +191,9 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
             }
             TRAY_MENU_REMINDERS => {
                 let _ = show_list_mode(app);
+            }
+            TRAY_MENU_CHAINS => {
+                let _ = show_chain_mode(app);
             }
             TRAY_MENU_SETTINGS => {
                 let _ = show_settings_mode(app);

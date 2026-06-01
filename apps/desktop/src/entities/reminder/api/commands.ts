@@ -8,6 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ChainNode,
   Recurrence,
   ReminderCategory,
   ReminderNode,
@@ -46,6 +47,19 @@ export interface AdvanceRecurrencePatch {
   updatedAt: string;
 }
 
+/**
+ * Re-position a node in the chain forest — link / unlink / reorder in one op.
+ * `parentId` omitted = a top-level root; `afterId` omitted = the head of the
+ * target sibling group. The Rust side enforces integrity (no self-parent, no
+ * cycle, same-group `afterId`).
+ */
+export interface MovePatch {
+  id: string;
+  parentId?: string;
+  afterId?: string;
+  updatedAt: string;
+}
+
 export function createReminderNodeCommand(reminder: ReminderNode): Promise<ReminderNode> {
   return invoke<ReminderNode>("create_reminder_node", { reminder });
 }
@@ -72,4 +86,14 @@ export function advanceReminderRecurrence(
   patch: AdvanceRecurrencePatch,
 ): Promise<ReminderNode> {
   return invoke<ReminderNode>("advance_reminder_recurrence", { patch });
+}
+
+/** The assembled chain forest (nested roots → children, ordered by links). */
+export function listReminderChains(): Promise<ChainNode[]> {
+  return invoke<ChainNode[]>("list_reminder_chains");
+}
+
+/** Link / unlink / reorder a node within the chain forest. */
+export function moveReminderNode(patch: MovePatch): Promise<ReminderNode> {
+  return invoke<ReminderNode>("move_reminder_node", { patch });
 }
