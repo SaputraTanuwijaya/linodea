@@ -151,6 +151,16 @@ fn dismiss_alert(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_timer(app: tauri::AppHandle, payload: desktop::TimerPayload) -> Result<(), String> {
+    desktop::show_timer(&app, payload).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn dismiss_timer(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::hide_timer(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -189,6 +199,8 @@ pub fn run() {
             set_popup_height,
             show_alert,
             dismiss_alert,
+            show_timer,
+            dismiss_timer,
             quit_app
         ])
         .run(tauri::generate_context!())

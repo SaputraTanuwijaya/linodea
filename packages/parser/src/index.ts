@@ -111,12 +111,22 @@ export function normalizeReminderInput(input: string): string {
 }
 
 /**
+ * Bare name of the exact-second timing command, without the leading slash.
+ * Single source of truth shared with the desktop app's slash-command registry
+ * (`features/slash-commands`) so the parser and UI can't drift on the name.
+ */
+export const COUNTDOWN_COMMAND_NAME = "countdown";
+
+/**
  * Opt-in exact-second timing keyword. By default relative reminders snap to the
  * minute (:00); `/countdown` keeps the exact instant (typed at :47 → fires at
  * :47). Detected case-insensitively as a standalone token and stripped from the
  * text so it never lands in the title or checklist.
  */
-const COUNTDOWN_PATTERN = /(?:^|\s)\/countdown(?=\s|$)/i;
+const COUNTDOWN_PATTERN = new RegExp(
+  `(?:^|\\s)\\/${COUNTDOWN_COMMAND_NAME}(?=\\s|$)`,
+  "i",
+);
 
 function roundToMinute(ms: number): number {
   return Math.round(ms / 60_000) * 60_000;
@@ -201,6 +211,7 @@ export function parseReminderWithNow(
     parsedAt,
     draft,
     issues,
+    countdown,
   };
 }
 

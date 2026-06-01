@@ -25,7 +25,7 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 
 - `in 30m`, `in 2h`
 - `30m lagi`, `2 jam lagi`
-- Relative reminders **snap to the nearest minute (`:00`)** by default, so firing is clean and predictable. Add the keyword **`/countdown`** anywhere in the input to keep the exact second instead (typed at `:47` → fires at `:47`); the keyword is stripped from the title. Clock/date times already resolve to `:00`.
+- Relative reminders **snap to the nearest minute (`:00`)** by default, so firing is clean and predictable. Add the keyword **`/countdown`** anywhere in the input to keep the exact second instead (typed at `:47` → fires at `:47`); the keyword is stripped from the title. Clock/date times already resolve to `:00`. The bare command name is exported as `COUNTDOWN_COMMAND_NAME` (single source of truth shared with the desktop slash-command registry), and `parseReminder` surfaces a `countdown: boolean` on its result so the UI can show the on-screen countdown timer.
 
 ### Date words
 

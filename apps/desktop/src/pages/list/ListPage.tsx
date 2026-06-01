@@ -179,6 +179,9 @@ export function ListPage({
               return (
                 <li className={`flex items-center gap-2 px-1 py-2 ${rowBorder}`} key={reminder.id}>
                   <input
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    autoCorrect="off"
                     autoFocus
                     className="min-w-0 flex-1 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-2 py-1 text-sm text-[var(--lin-text)] outline-none"
                     onChange={(event) => setEditText(event.target.value)}

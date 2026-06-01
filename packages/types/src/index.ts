@@ -141,6 +141,11 @@ export interface ReminderParseResult {
   parsedAt: IsoDateTimeString;
   draft: ParsedReminderDraft;
   issues: ParserIssue[];
+  /**
+   * True when the input used the `/countdown` command (exact-second timing).
+   * Surfaced so the capture UI can show the on-screen countdown timer window.
+   */
+  countdown?: boolean;
 }
 
 export interface ShortcutSettings {

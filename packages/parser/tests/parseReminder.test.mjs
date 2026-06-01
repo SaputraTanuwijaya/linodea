@@ -217,6 +217,8 @@ test("relative reminders snap to the minute by default", () => {
   // 18:00:47Z + 2m = 18:02:47Z, rounded to nearest minute -> 18:03:00Z.
   assert.equal(result.draft.title, "standup");
   assert.equal(result.draft.scheduledAt, "2026-05-21T18:03:00.000Z");
+  // No /countdown keyword -> the flag is not set.
+  assert.ok(!result.countdown);
 });
 
 test("/countdown keeps the exact second and is stripped from the title", () => {
@@ -227,6 +229,8 @@ test("/countdown keeps the exact second and is stripped from the title", () => {
   // Keyword must not pollute the title or checklist.
   assert.equal(result.draft.title, "standup");
   assert.ok(!/countdown/i.test(result.draft.title));
+  // Flag surfaced so the capture UI can show the countdown timer window.
+  assert.equal(result.countdown, true);
 });
 
 test("/countdown works regardless of position in the input", () => {
@@ -234,4 +238,5 @@ test("/countdown works regardless of position in the input", () => {
 
   assert.equal(result.draft.scheduledAt, "2026-05-21T18:02:47.000Z");
   assert.equal(result.draft.title, "boil egg");
+  assert.equal(result.countdown, true);
 });

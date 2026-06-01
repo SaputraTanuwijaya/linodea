@@ -6,6 +6,14 @@
  *   - calls `onSaved` so App.tsx can bump the list-refresh signal.
  *   - hides the window only when the popup is in capture mode (in list /
  *     settings mode, saving keeps the popup open and re-focuses the input).
+ *   - if the reminder used `/countdown`, shows the on-screen countdown timer
+ *     window (`show_timer`). The timer is display-only — the scheduler still
+ *     owns firing the alert at the exact instant.
+ *
+ * The input is a `HighlightedInput` (transparent input over a colored mirror)
+ * so `/command` tokens render yellow, and `useSlashCommands` drives the
+ * autocomplete dropdown. The window grows while the dropdown is open (capture
+ * mode only) so the menu isn't clipped, mirroring the `•••` menu behavior.
  *
  * The `••• menu` button trigger and the right-click context menu are owned
  * by App.tsx — this component just renders the button and calls back.
@@ -13,22 +21,33 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { parseReminder } from "@linodea/parser";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ChangeEvent,
   FormEvent,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
   RefObject,
+  SyntheticEvent,
 } from "react";
 
 import { PreviewLine } from "@/features/autocorrect-display";
 import type { LanguageId } from "@/features/language";
+import {
+  HighlightedInput,
+  SlashCommandMenu,
+  useSlashCommands,
+  type SlashApplyResult,
+} from "@/features/slash-commands";
 import {
   createReminderNode,
   createReminderNodeCommand,
 } from "@/entities/reminder";
 import type { Strings } from "@/shared/i18n";
 import { getDeviceId, isTauriRuntime } from "@/shared/lib";
+
+const CAPTURE_DEFAULT_HEIGHT = 130;
+const CAPTURE_WITH_SLASH_HEIGHT = 240;
 
 export function CapturePage({
   inputRef,
@@ -49,9 +68,12 @@ export function CapturePage({
   strings: Strings;
 }) {
   const [input, setInput] = useState("");
+  const [caret, setCaret] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const internalRef = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? internalRef;
+
+  const slash = useSlashCommands(input, caret, strings);
 
   const parsedReminder = useMemo(
     () =>
@@ -62,7 +84,66 @@ export function CapturePage({
   );
   const canSave = Boolean(parsedReminder?.draft.scheduledAt && input.trim());
 
+  // Grow the popup while the slash menu is open so the dropdown isn't clipped;
+  // restore on close. Capture mode only — list/settings own their own height.
+  useEffect(() => {
+    if (!isTauriRuntime() || !shouldHideAfterSave) return;
+    void invoke("set_popup_height", {
+      height: slash.isOpen ? CAPTURE_WITH_SLASH_HEIGHT : CAPTURE_DEFAULT_HEIGHT,
+    }).catch(() => undefined);
+  }, [slash.isOpen, shouldHideAfterSave]);
+
+  function syncCaret(el: HTMLInputElement) {
+    setCaret(el.selectionStart ?? el.value.length);
+  }
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    setInput(event.target.value);
+    syncCaret(event.currentTarget);
+  }
+
+  function handleSelect(event: SyntheticEvent<HTMLInputElement>) {
+    syncCaret(event.currentTarget);
+  }
+
+  function applySlash(result: SlashApplyResult) {
+    setInput(result.value);
+    setCaret(result.caret);
+    window.requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(result.caret, result.caret);
+    });
+  }
+
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (slash.isOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        slash.moveSelection(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        slash.moveSelection(-1);
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        const result = slash.applySelected();
+        if (result) {
+          event.preventDefault();
+          applySlash(result);
+          return;
+        }
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        slash.close();
+        return;
+      }
+    }
+
     if (event.key !== "Escape") return;
     event.preventDefault();
     setInput("");
@@ -83,7 +164,20 @@ export function CapturePage({
     try {
       const reminder = createReminderNode(parsedReminder, getDeviceId());
       await createReminderNodeCommand(reminder);
+
+      // `/countdown` reminders get an on-screen countdown timer. Display-only:
+      // the scheduler still fires the alert at the exact instant.
+      if (parsedReminder.countdown && parsedReminder.draft.scheduledAt) {
+        void invoke("show_timer", {
+          payload: {
+            title: reminder.title,
+            targetMs: Date.parse(parsedReminder.draft.scheduledAt),
+          },
+        }).catch(() => undefined);
+      }
+
       setInput("");
+      setCaret(0);
       // onSaved triggers the scheduler to fire anything immediately due and
       // arm a precise timer for this new reminder.
       onSaved();
@@ -105,19 +199,16 @@ export function CapturePage({
       className="relative flex w-full items-center rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] py-3.5 pl-11 pr-11 shadow-2xl backdrop-blur transition-colors"
       onSubmit={handleSubmit}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div className="relative flex min-w-0 flex-1 flex-col gap-1">
         <label className="sr-only" htmlFor="quick-capture-input">
           {strings.menu.capture}
         </label>
-        <input
-          autoFocus
-          className="w-full bg-transparent text-base font-medium leading-tight tracking-tight text-[var(--lin-text)] outline-none placeholder:text-[var(--lin-text-mute)]"
-          id="quick-capture-input"
-          onChange={(event) => setInput(event.target.value)}
+        <HighlightedInput
+          inputRef={ref}
+          onChange={handleChange}
           onKeyDown={handleInputKeyDown}
+          onSelect={handleSelect}
           placeholder={strings.placeholder}
-          ref={ref}
-          spellCheck={false}
           value={input}
         />
         <p className="truncate text-xs leading-tight text-[var(--lin-text-dim)]">
@@ -127,6 +218,13 @@ export function CapturePage({
             strings={strings}
           />
         </p>
+        {slash.isOpen ? (
+          <SlashCommandMenu
+            onPick={(suggestion) => applySlash(slash.applyCommand(suggestion))}
+            selectedIndex={slash.selectedIndex}
+            suggestions={slash.suggestions}
+          />
+        ) : null}
       </div>
       <button
         aria-label="Open menu"

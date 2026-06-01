@@ -7,11 +7,14 @@ use tauri::{
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const ALERT_WINDOW_LABEL: &str = "alert";
+const TIMER_WINDOW_LABEL: &str = "timer";
 const NOTIFY_EVENT: &str = "linodea:notify";
+const TIMER_EVENT: &str = "linodea:timer";
 const ALERT_SIZE: (f64, f64) = (360.0, 120.0);
+const TIMER_SIZE: (f64, f64) = (220.0, 120.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
-const ALERT_MARGIN: f64 = 16.0;
-const ALERT_BOTTOM_SLACK: f64 = 48.0;
+const BOTTOM_RIGHT_MARGIN: f64 = 16.0;
+const BOTTOM_RIGHT_SLACK: f64 = 48.0;
 const TRAY_MENU_CAPTURE: &str = "show_capture";
 const TRAY_MENU_REMINDERS: &str = "show_reminders";
 const TRAY_MENU_SETTINGS: &str = "show_settings";
@@ -69,7 +72,7 @@ pub struct AlertPayload {
 /// never focuses the window — it grabs attention without stealing input.
 pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
     let window = alert_window(app)?;
-    let _ = position_alert_bottom_right(&window);
+    let _ = position_bottom_right(&window, ALERT_SIZE);
     let _ = app.emit_to(ALERT_WINDOW_LABEL, NOTIFY_EVENT, payload);
     window.show()?;
     let _ = window.set_always_on_top(true);
@@ -80,20 +83,51 @@ pub fn hide_alert(app: &AppHandle) -> tauri::Result<()> {
     alert_window(app)?.hide()
 }
 
+/// Data for the on-screen countdown timer window. The timer webview ticks the
+/// remaining time from `target_ms` (epoch ms) down to zero.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimerPayload {
+    pub title: String,
+    pub target_ms: i64,
+}
+
+/// Show the countdown timer window bottom-right, carrying `payload`. Like the
+/// alert, it never steals focus. A new countdown replaces the shown one.
+pub fn show_timer(app: &AppHandle, payload: TimerPayload) -> tauri::Result<()> {
+    let window = timer_window(app)?;
+    let _ = position_bottom_right(&window, TIMER_SIZE);
+    let _ = app.emit_to(TIMER_WINDOW_LABEL, TIMER_EVENT, payload);
+    window.show()?;
+    let _ = window.set_always_on_top(true);
+    Ok(())
+}
+
+pub fn hide_timer(app: &AppHandle) -> tauri::Result<()> {
+    timer_window(app)?.hide()
+}
+
 fn alert_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     app.get_webview_window(ALERT_WINDOW_LABEL)
         .ok_or(tauri::Error::WindowNotFound)
 }
 
-fn position_alert_bottom_right(window: &WebviewWindow) -> tauri::Result<()> {
+fn timer_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    app.get_webview_window(TIMER_WINDOW_LABEL)
+        .ok_or(tauri::Error::WindowNotFound)
+}
+
+/// Pin `window` to the bottom-right of its current monitor, leaving margin and
+/// taskbar slack. `size` is the window's logical (width, height).
+fn position_bottom_right(window: &WebviewWindow, size: (f64, f64)) -> tauri::Result<()> {
     let Some(monitor) = window.current_monitor()? else {
         return Ok(());
     };
     let scale = monitor.scale_factor();
     let m_pos = monitor.position();
     let m_size = monitor.size();
-    let win_w = (ALERT_SIZE.0 + ALERT_MARGIN) * scale;
-    let win_h = (ALERT_SIZE.1 + ALERT_MARGIN + ALERT_BOTTOM_SLACK) * scale;
+    let win_w = (size.0 + BOTTOM_RIGHT_MARGIN) * scale;
+    let win_h = (size.1 + BOTTOM_RIGHT_MARGIN + BOTTOM_RIGHT_SLACK) * scale;
     let x = m_pos.x as f64 + m_size.width as f64 - win_w;
     let y = m_pos.y as f64 + m_size.height as f64 - win_h;
     window.set_position(PhysicalPosition::new(x, y))?;

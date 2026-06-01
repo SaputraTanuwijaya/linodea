@@ -80,6 +80,15 @@ export interface Strings {
     toggleHint: string;
     unavailable: string;
   };
+  /** Slash-command autocomplete: per-command label + description shown in the dropdown. */
+  slash: {
+    countdown: { label: string; description: string };
+  };
+  /** On-screen countdown timer window. */
+  timer: {
+    caption: string;
+    dismiss: string;
+  };
 }
 
 const MINUTES_PER_DAY = 24 * 60;
@@ -157,6 +166,16 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleHint: "Linodea starts hidden in the tray and waits for the global shortcut.",
       unavailable: "Available only in the desktop app.",
     },
+    slash: {
+      countdown: {
+        label: "/countdown",
+        description: "Keep exact-second timing and show an on-screen countdown.",
+      },
+    },
+    timer: {
+      caption: "Countdown",
+      dismiss: "Dismiss timer",
+    },
   },
   id: {
     menu: {
@@ -228,6 +247,16 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleLabel: "Jalankan saat startup",
       toggleHint: "Linodea berjalan tersembunyi di tray dan menunggu pintasan global.",
       unavailable: "Hanya tersedia di aplikasi desktop.",
+    },
+    slash: {
+      countdown: {
+        label: "/countdown",
+        description: "Pertahankan waktu detik tepat dan tampilkan hitung mundur di layar.",
+      },
+    },
+    timer: {
+      caption: "Hitung mundur",
+      dismiss: "Tutup timer",
     },
   },
 };

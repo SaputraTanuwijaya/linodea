@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import "./App.css";
 import App from "./App";
 import { AlertPage } from "@/pages/alert";
+import { TimerPage } from "@/pages/timer";
 import { applyLanguage, getStoredLanguage } from "@/features/language";
 import { applyTheme, getStoredTheme } from "@/features/theme";
 import { isTauriRuntime } from "@/shared/lib";
@@ -14,11 +15,16 @@ import { isTauriRuntime } from "@/shared/lib";
 applyTheme(getStoredTheme());
 applyLanguage(getStoredLanguage());
 
-// One bundle serves both windows; route by window label. The "alert" window
-// (Rust-shown at fire time) renders the notification card; everything else is
-// the main popup.
+// One bundle serves every window; route by window label. The "alert" window
+// (Rust-shown at fire time) renders the notification card, the "timer" window
+// renders the `/countdown` countdown; everything else is the main popup.
 const windowLabel = isTauriRuntime() ? getCurrentWindow().label : "main";
-const Root = windowLabel === "alert" ? AlertPage : App;
+const Root =
+  windowLabel === "alert"
+    ? AlertPage
+    : windowLabel === "timer"
+      ? TimerPage
+      : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
