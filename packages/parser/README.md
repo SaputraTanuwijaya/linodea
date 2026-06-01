@@ -64,12 +64,16 @@ Splitters: comma, plus, `and`, `dan`. Short bring/prepare phrases split by word.
 
 ### Category heuristics
 
-| Keywords | Category |
+Driven by the `CATEGORY_*` vocabularies in `vocabularies.ts` (the single source — there is no parallel regex), matched **exact-then-fuzzy** in the priority order below. First hit wins, so the order resolves cross-category overlaps (e.g. `university` precedes `urgent`). Representative keywords — see the vocabularies for the full bilingual lists.
+
+| Category (priority) | Keywords (representative) |
 |---|---|
-| `les`, `tutor`, `privat` | tutoring |
-| `lab`, `class`, `kelas`, `kuliah`, `campus`, `ktm`, `grading`, `rubric`, `slides` | university |
-| `cpi`, `fomc`, `earnings`, `crypto`, `saham`, `stock`, `invest`, `thesis` | investing |
-| obvious urgent/waiting/personal keywords | urgent / waiting / personal |
+| tutoring | `les`, `privat`, `bimbel`, `ngajar`, `murid`, `tutor`, `tutoring` |
+| university | `lab`, `class`, `kelas`, `kuliah`, `kampus`, `tugas`, `ujian`, `kuis`, `skripsi`, `slides`, `presentasi` |
+| investing | `cpi`, `fomc`, `saham`, `stock`, `invest`, `dividen`, `reksadana`, `ihsg`, `portofolio` |
+| urgent | `urgent`, `asap`, `penting`, `darurat`, `segera`, `mendesak` |
+| waiting | `waiting`, `pending`, `follow up`, `menunggu`, `nunggu`, `konfirmasi` |
+| personal | `personal`, `rumah`, `keluarga`, `dokter`, `obat`, `belanja`, `olahraga`, `ultah` |
 | default | uncategorized |
 
 ## Typo tolerance (v1)
@@ -89,9 +93,10 @@ The parser falls back to fuzzy matching when an exact regex misses. Uses Damerau
 
 Both still emit an `autocorrect` issue, so the popup surfaces the correction for the user to verify — the residual false-positive risk (e.g. `jam 7 store`, or a genuine interior item within distance 1 of `dan`) is visible, not silent.
 
+**Added in v1.2** (categories): category vocabularies are now fuzzy-matched as a fallback, capped at distance 1 (same short-vocab guard as v1.1, because the lists are large and false-match-prone). Reached only when every exact pass misses, and each hit emits an `autocorrect` issue, so the residual false-positive risk is visible, not silent. Category is a low-stakes hint and correctable in the chain view, so the looser exposure is acceptable. `besok review sahm BBCA` → investing (`sahm → saham`).
+
 **What stays exact** (intentional):
 - `jam`, `am`, `pm`, time units (`m/min/h/hr`) — short and rarely typo'd
-- Category vocabularies — too many words, higher false-match risk; still deferred
 
 **Emitted issues**:
 

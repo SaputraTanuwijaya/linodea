@@ -425,3 +425,40 @@ test("addRecurrenceInterval monthly clamps the day to month length", () => {
     "2026-02-28T05:00:00.000Z",
   );
 });
+
+// --- Category detection v1.2 (expanded vocabularies + fuzzy fallback) ---
+
+test("categorizes from an expanded Indonesian university keyword (tugas)", () => {
+  const result = parseReminderWithNow("besok jam 9 kumpulin tugas statistika", options);
+
+  assert.equal(result.draft.category, "university");
+  // Exact keyword match emits no autocorrect noise.
+  assert.equal(result.issues.filter((i) => i.code === "autocorrect").length, 0);
+});
+
+test("categorizes from an expanded Indonesian investing keyword (dividen)", () => {
+  const result = parseReminderWithNow("jumat cek dividen reksadana", options);
+
+  assert.equal(result.draft.category, "investing");
+});
+
+test("fuzzy-categorizes a typo'd keyword and surfaces an autocorrect (sahm -> saham)", () => {
+  const result = parseReminderWithNow("besok jam 8 review sahm BBCA", options);
+
+  assert.equal(result.draft.category, "investing");
+  const autocorrect = result.issues.find(
+    (i) => i.code === "autocorrect" && i.corrected === "saham",
+  );
+  assert.ok(autocorrect, "expected an autocorrect issue for sahm -> saham");
+  assert.equal(autocorrect.original.toLowerCase(), "sahm");
+  assert.equal(autocorrect.distance, 1);
+});
+
+test("a near-miss everyday word is not mis-categorized (form !-> a category)", () => {
+  // "form" sits one edit from several plausible keywords; the distance-1 fuzzy
+  // fallback must not pull it into a category. (Guards the dropped "dorm" case.)
+  const result = parseReminderWithNow("2 jam lagi submit form", options);
+
+  assert.equal(result.draft.category, "uncategorized");
+  assert.equal(result.issues.filter((i) => i.code === "autocorrect").length, 0);
+});

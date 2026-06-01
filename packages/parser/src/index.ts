@@ -9,6 +9,12 @@ import type {
   ReminderType,
 } from "@linodea/types";
 import {
+  CATEGORY_INVESTING,
+  CATEGORY_PERSONAL,
+  CATEGORY_TUTORING,
+  CATEGORY_UNIVERSITY,
+  CATEGORY_URGENT,
+  CATEGORY_WAITING,
   CHECKLIST_CONJUNCTIONS,
   CHECKLIST_CUES,
   DATE_WORDS,
@@ -166,6 +172,10 @@ export function parseReminderWithNow(
     countdown,
   );
   const typeFinding = detectReminderType(normalizedInput, options.preferredLanguage);
+  const categoryFinding = detectReminderCategory(
+    normalizedInput,
+    options.preferredLanguage,
+  );
   const typeSegments = findTypeSegments(normalizedInput);
   const textWithoutMeta = removeSegments(normalizedInput, [
     ...dateTime.segments,
@@ -176,6 +186,7 @@ export function parseReminderWithNow(
 
   const issues: ParserIssue[] = [...dateTime.issues];
   if (typeFinding.issue) issues.push(typeFinding.issue);
+  if (categoryFinding.issue) issues.push(categoryFinding.issue);
   issues.push(...checklistParse.issues);
 
   // Autocorrects shouldn't tank confidence as hard as real parse failures.
@@ -202,7 +213,7 @@ export function parseReminderWithNow(
     scheduledAt: dateTime.scheduledAt,
     timezone: options.timezone,
     type: typeFinding.type,
-    category: detectReminderCategory(normalizedInput),
+    category: categoryFinding.category,
     checklist: checklistParse.checklist,
     confidence,
     recurrence: dateTime.recurrence,
@@ -1003,36 +1014,103 @@ function cleanTitle(input: string): string {
     .trim();
 }
 
-function detectReminderCategory(input: string): ReminderCategory {
+interface CategoryFinding {
+  category: ReminderCategory;
+  issue?: ParserIssue;
+}
+
+/**
+ * Category vocabularies in priority order. First exact (then fuzzy) hit wins,
+ * so the order resolves cross-category overlaps (e.g. "urgent lab session"
+ * stays university because university precedes urgent — matching the prior
+ * hand-written regex order).
+ */
+const CATEGORY_GROUPS: ReadonlyArray<{
+  vocab: VocabularyEntry[];
+  category: ReminderCategory;
+  kind: string;
+  exact: RegExp;
+}> = (
+  [
+    { vocab: CATEGORY_TUTORING, category: "tutoring", kind: "tutoring cue" },
+    { vocab: CATEGORY_UNIVERSITY, category: "university", kind: "university cue" },
+    { vocab: CATEGORY_INVESTING, category: "investing", kind: "investing cue" },
+    { vocab: CATEGORY_URGENT, category: "urgent", kind: "urgent cue" },
+    { vocab: CATEGORY_WAITING, category: "waiting", kind: "waiting cue" },
+    { vocab: CATEGORY_PERSONAL, category: "personal", kind: "personal cue" },
+  ] satisfies ReadonlyArray<{
+    vocab: VocabularyEntry[];
+    category: ReminderCategory;
+    kind: string;
+  }>
+).map((g) => ({ ...g, exact: vocabularyRegex(g.vocab) }));
+
+/** Case-insensitive word-boundary regex matching any word in a vocabulary. */
+function vocabularyRegex(vocab: VocabularyEntry[]): RegExp {
+  const alternation = vocab
+    .map((entry) => entry.word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  return new RegExp(`\\b(?:${alternation})\\b`, "i");
+}
+
+/**
+ * Categorize from keyword vocabularies, exact-then-fuzzy, mirroring
+ * `detectReminderType`. Category is a low-stakes organizational hint, so the
+ * fuzzy fallback is capped at edit distance 1 (the v1.1 short-vocab guard):
+ * the vocabularies are large and false-match-prone, and a wrong guess here
+ * costs little and is correctable in the chain view. Each fuzzy hit emits an
+ * `autocorrect` issue so the correction is visible, not silent.
+ */
+function detectReminderCategory(
+  input: string,
+  preferredLanguage: PreferredLanguage,
+): CategoryFinding {
   const lower = input.toLowerCase();
 
-  if (/\b(les|tutor|tutoring|privat)\b/.test(lower)) {
-    return "tutoring";
+  // Exact pass — behavior-preserving, zero added false-match risk.
+  for (const { exact, category } of CATEGORY_GROUPS) {
+    if (exact.test(lower)) return { category };
   }
 
-  if (/\b(lab|class|kelas|kuliah|campus|kampus|ktm|grading|rubric|slides)\b/.test(
-    lower,
-  )) {
-    return "university";
+  // Fuzzy fallback (distance 1 only). Reached only when every exact pass missed.
+  for (const { vocab, category, kind } of CATEGORY_GROUPS) {
+    const fuzzy = findFuzzyTokenMatch(input, wordsOf(vocab), {
+      maxDistance: distanceOneOnly,
+    });
+    if (!fuzzy) continue;
+
+    // Both tied candidates live in the same vocabulary, so the category is
+    // unambiguous even when the exact word isn't — cite the language-biased
+    // word if we can, otherwise the first candidate.
+    if ("ambiguous" in fuzzy) {
+      const biased = resolveByLanguage(
+        fuzzy.ambiguous.candidates,
+        vocab,
+        preferredLanguage,
+      );
+      return {
+        category,
+        issue: makeAutocorrectIssue(
+          fuzzy.original,
+          biased?.word ?? fuzzy.ambiguous.candidates[0],
+          fuzzy.ambiguous.distance,
+          kind,
+        ),
+      };
+    }
+
+    return {
+      category,
+      issue: makeAutocorrectIssue(
+        fuzzy.original,
+        fuzzy.result.matched,
+        fuzzy.result.distance,
+        kind,
+      ),
+    };
   }
 
-  if (/\b(cpi|fomc|earnings|crypto|saham|stock|invest|thesis)\b/.test(lower)) {
-    return "investing";
-  }
-
-  if (/\b(urgent|asap|penting|darurat)\b/.test(lower)) {
-    return "urgent";
-  }
-
-  if (/\b(waiting|menunggu|follow up|follow-up)\b/.test(lower)) {
-    return "waiting";
-  }
-
-  if (/\b(personal|home|rumah|family|keluarga)\b/.test(lower)) {
-    return "personal";
-  }
-
-  return "uncategorized";
+  return { category: "uncategorized" };
 }
 
 function scoreConfidence(input: {

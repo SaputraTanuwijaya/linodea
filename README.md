@@ -5,7 +5,7 @@ Linodea is a local-first desktop reminder app for fast capture and preparation-a
 Status: early MVP skeleton. The repository currently includes the desktop shell,
 quick capture popup v1, shared types, a deterministic English + Indonesian parser
 with typo tolerance (fuzzy date words, checklist cues, type cues, Indonesian time
-markers, and conjunctions), and a local SQLite data layer with status and
+markers, conjunctions, and category keywords), and a local SQLite data layer with status and
 due-reminder queries. The capture surface is a frameless floating popup: pressing
 `Ctrl+Alt+Shift+Space` summons a small dark rounded textbox, typing a reminder
 shows the parsed time inline, and Enter saves and dismisses. The popup auto-hides
