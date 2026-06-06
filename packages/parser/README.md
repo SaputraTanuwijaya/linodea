@@ -15,6 +15,11 @@ parseReminderWithNow(rawInput, { now, timezone });
 
 // Trim and collapse whitespace.
 normalizeReminderInput(input);
+
+// Resolve a `/link`-ed reminder's time RELATIVE TO an anchor (not now).
+// `30m before` / `1 jam after` / absolute `jam 9`; role derived from direction
+// (before → prep, after → followup). See the /link section below.
+parseAnchorLink(text, { anchor, timezone?, defaultDirection? });
 ```
 
 Return type: `ReminderParseResult` from `@linodea/types`.
@@ -76,6 +81,16 @@ Driven by the `CATEGORY_*` vocabularies in `vocabularies.ts` (the single source 
 | waiting | `waiting`, `pending`, `follow up`, `menunggu`, `nunggu`, `konfirmasi` |
 | personal | `personal`, `rumah`, `keluarga`, `dokter`, `obat`, `belanja`, `olahraga`, `ultah` |
 | default | uncategorized |
+
+## `/link` anchor-relative time (`parseAnchorLink`)
+
+For reminders chained to another (`/link` in the capture UI). Resolves the time **against the anchor's `scheduledAt`**, not now:
+
+- `30m before` / `1 jam after` → anchor ∓ offset. Sign comes from the `before`/`after` (`sebelum`/`setelah`) word, else `defaultDirection` (default `before`). Spelled numbers work (`tiga jam before`).
+- An absolute clock time (`jam 9`, `8pm`, `19:00`) → that time on the anchor's local date; direction is then **derived** by comparison.
+- Returns `{ title, scheduledAt, direction, role, kind, offsetMs?, issues }`. `role` (`prep`/`followup`) is derived from `direction` — position is the source of truth, so it can't contradict the time. No time at all → sits at the anchor instant + a `missing_time` issue (links rather than refuses).
+
+The parser stays anchor-agnostic everywhere else; this is the one entry the capture layer calls once an anchor is picked. Reuses the relative/clock matchers above.
 
 ## Typo tolerance (v1)
 

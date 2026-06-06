@@ -42,6 +42,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     template: "every ",
     strings: (s) => s.slash.recur,
   },
+  {
+    // Picking `/link` doesn't insert text — the capture page intercepts it and
+    // opens a second-phase anchor picker (see CapturePage). Registered here only
+    // so it shows in the dropdown with a label + description like the others.
+    name: "link",
+    kind: "action",
+    strings: (s) => s.slash.link,
+  },
 ];
 
 /** Lower-cased set of every command name + alias, for the input highlighter. */

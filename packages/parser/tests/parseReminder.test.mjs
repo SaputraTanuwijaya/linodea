@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addRecurrenceInterval, parseReminderWithNow } from "../dist/index.js";
+import {
+  addRecurrenceInterval,
+  parseAnchorLink,
+  parseReminderWithNow,
+} from "../dist/index.js";
 
 const options = {
   now: "2026-05-22T01:00:00+07:00",
@@ -541,4 +545,76 @@ test("a near-miss everyday word is not mis-categorized (form !-> a category)", (
 
   assert.equal(result.draft.category, "uncategorized");
   assert.equal(result.issues.filter((i) => i.code === "autocorrect").length, 0);
+});
+
+// --- /link anchor-relative time (parseAnchorLink) ---
+// Anchor sits at 14:00 Jakarta == 07:00:00Z. Offsets resolve from THERE, not now.
+const anchorOpts = { anchor: "2026-05-22T07:00:00.000Z", timezone: "Asia/Jakarta" };
+
+test("relative offset before the anchor → prep, time counts back from the anchor", () => {
+  const r = parseAnchorLink("review draft 30m before", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T06:30:00.000Z"); // 14:00 - 30m
+  assert.equal(r.direction, "before");
+  assert.equal(r.role, "prep");
+  assert.equal(r.kind, "offset");
+  assert.equal(r.title, "review draft");
+});
+
+test("relative offset after the anchor → follow-up", () => {
+  const r = parseAnchorLink("celebrate 1 jam after", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T08:00:00.000Z"); // 14:00 + 1h
+  assert.equal(r.direction, "after");
+  assert.equal(r.role, "followup");
+  assert.equal(r.title, "celebrate");
+});
+
+test("no direction word defaults to before (prep)", () => {
+  const r = parseAnchorLink("call boss 2 jam", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T05:00:00.000Z"); // 14:00 - 2h
+  assert.equal(r.direction, "before");
+  assert.equal(r.role, "prep");
+});
+
+test("defaultDirection option flips the no-keyword default to after", () => {
+  const r = parseAnchorLink("wrap up 30m", { ...anchorOpts, defaultDirection: "after" });
+
+  assert.equal(r.scheduledAt, "2026-05-22T07:30:00.000Z"); // 14:00 + 30m
+  assert.equal(r.direction, "after");
+  assert.equal(r.role, "followup");
+});
+
+test("spelled-out offset works (tiga jam before)", () => {
+  const r = parseAnchorLink("tiga jam before submit", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T04:00:00.000Z"); // 14:00 - 3h
+  assert.equal(r.title, "submit");
+  assert.equal(r.role, "prep");
+});
+
+test("absolute clock time lands on the anchor's date, direction derived by comparison", () => {
+  const r = parseAnchorLink("print slides jam 9", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T02:00:00.000Z"); // 09:00 Jakarta on anchor's day
+  assert.equal(r.kind, "absolute");
+  assert.equal(r.direction, "before"); // 09:00 < 14:00
+  assert.equal(r.role, "prep");
+  assert.equal(r.title, "print slides");
+});
+
+test("absolute time after the anchor derives follow-up", () => {
+  const r = parseAnchorLink("dinner 8pm", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T13:00:00.000Z"); // 20:00 Jakarta
+  assert.equal(r.direction, "after"); // 20:00 > 14:00
+  assert.equal(r.role, "followup");
+});
+
+test("no offset/time links at the anchor instant and flags it", () => {
+  const r = parseAnchorLink("remember to smile", anchorOpts);
+
+  assert.equal(r.scheduledAt, "2026-05-22T07:00:00.000Z"); // the anchor itself
+  assert.ok(r.issues.some((i) => i.code === "missing_time"));
 });

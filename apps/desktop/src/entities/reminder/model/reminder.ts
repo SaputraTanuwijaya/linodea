@@ -4,6 +4,7 @@
  * Pure transforms over reminder data — no React, no I/O.
  */
 
+import type { AnchorLinkResult } from "@linodea/parser";
 import type { ReminderNode, ReminderParseResult } from "@linodea/types";
 
 /**
@@ -34,6 +35,39 @@ export function createReminderNode(
     checklist: parseResult.draft.checklist,
     confidence: parseResult.draft.confidence,
     recurrence: parseResult.draft.recurrence,
+    createdAt: now,
+    updatedAt: now,
+    createdOnDeviceId: deviceId,
+    syncVersion: 0,
+  };
+}
+
+/**
+ * Build a reminder that is linked to an anchor (a `/link` capture). Time + role
+ * come from `parseAnchorLink`; the node **inherits the anchor's category and
+ * timezone** so it groups under the same chain. The caller links it into the
+ * forest with `moveReminderNode({ parentId: anchor.id })` after creating it.
+ */
+export function createLinkedReminderNode(
+  link: AnchorLinkResult,
+  anchor: ReminderNode,
+  rawInput: string,
+  deviceId: string,
+): ReminderNode {
+  const now = new Date().toISOString();
+
+  return {
+    id: crypto.randomUUID(),
+    title: link.title,
+    rawInput,
+    scheduledAt: link.scheduledAt,
+    timezone: anchor.timezone,
+    type: link.role, // "prep" | "followup" — derived from direction
+    status: "pending",
+    category: anchor.category, // inherit so it sits in the anchor's chain/section
+    checklist: [],
+    confidence: 0.9, // deterministic anchor math, not a fuzzy guess
+    recurrence: undefined,
     createdAt: now,
     updatedAt: now,
     createdOnDeviceId: deviceId,

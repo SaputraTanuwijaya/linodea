@@ -10,17 +10,21 @@
  *     window (`show_timer`). The timer is display-only — the scheduler still
  *     owns firing the alert at the exact instant.
  *
+ * `/link` is a two-phase flow: picking it from the slash dropdown opens an
+ * *anchor picker* (the same dropdown, now listing reminders); arrow/Enter binds
+ * an anchor, shown as a chip. The message you then type resolves its time
+ * **relative to the anchor** (`parseAnchorLink`), and on save the new reminder
+ * is created and linked under the anchor (`move_reminder_node`). No anchor
+ * picked ⇒ it just saves as a normal reminder (linking never blocks a save).
+ *
  * The input is a `HighlightedInput` (transparent input over a colored mirror)
  * so `/command` tokens render yellow, and `useSlashCommands` drives the
- * autocomplete dropdown. The window grows while the dropdown is open (capture
+ * autocomplete dropdown. The window grows while a dropdown is open (capture
  * mode only) so the menu isn't clipped, mirroring the `•••` menu behavior.
- *
- * The `••• menu` button trigger and the right-click context menu are owned
- * by App.tsx — this component just renders the button and calls back.
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { parseReminder } from "@linodea/parser";
+import { parseAnchorLink, parseReminder } from "@linodea/parser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent,
@@ -30,6 +34,7 @@ import type {
   RefObject,
   SyntheticEvent,
 } from "react";
+import type { ReminderNode } from "@linodea/types";
 
 import { PreviewLine } from "@/features/autocorrect-display";
 import type { LanguageId } from "@/features/language";
@@ -38,13 +43,19 @@ import {
   SlashCommandMenu,
   useSlashCommands,
   type SlashApplyResult,
+  type SlashCommandSuggestion,
 } from "@/features/slash-commands";
 import {
+  byScheduledAt,
+  createLinkedReminderNode,
   createReminderNode,
   createReminderNodeCommand,
+  isActionable,
+  listReminderNodes,
+  moveReminderNode,
 } from "@/entities/reminder";
 import type { Strings } from "@/shared/i18n";
-import { getDeviceId, isTauriRuntime } from "@/shared/lib";
+import { formatDateTime, getDeviceId, isTauriRuntime } from "@/shared/lib";
 
 const CAPTURE_DEFAULT_HEIGHT = 130;
 const CAPTURE_WITH_SLASH_HEIGHT = 240;
@@ -70,28 +81,60 @@ export function CapturePage({
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+
+  // `/link` two-phase state. `anchorPicking` = phase 2 (choosing the anchor);
+  // `linkAnchor` = the bound anchor (phase 3, typing the message).
+  const [anchorPicking, setAnchorPicking] = useState(false);
+  const [anchors, setAnchors] = useState<ReminderNode[]>([]);
+  const [anchorIndex, setAnchorIndex] = useState(0);
+  const [linkAnchor, setLinkAnchor] = useState<ReminderNode | null>(null);
+
   const internalRef = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? internalRef;
 
   const slash = useSlashCommands(input, caret, strings);
 
+  const filteredAnchors = useMemo(() => {
+    const q = input.trim().toLowerCase();
+    return q ? anchors.filter((a) => a.title.toLowerCase().includes(q)) : anchors;
+  }, [anchors, input]);
+  const clampedAnchorIndex = Math.min(anchorIndex, Math.max(0, filteredAnchors.length - 1));
+
   const parsedReminder = useMemo(
     () =>
-      input.trim()
+      !linkAnchor && !anchorPicking && input.trim()
         ? parseReminder(input, { preferredLanguage: language })
         : undefined,
-    [input, language],
+    [input, language, linkAnchor, anchorPicking],
   );
-  const canSave = Boolean(parsedReminder?.draft.scheduledAt && input.trim());
 
-  // Grow the popup while the slash menu is open so the dropdown isn't clipped;
-  // restore on close. Capture mode only — list/settings own their own height.
+  // Live resolution of the linked reminder's time, relative to the anchor.
+  const linkPreview = useMemo(() => {
+    if (!linkAnchor || !input.trim()) return undefined;
+    try {
+      return parseAnchorLink(input, {
+        anchor: linkAnchor.scheduledAt,
+        timezone: linkAnchor.timezone,
+        defaultDirection: "before",
+      });
+    } catch {
+      return undefined;
+    }
+  }, [linkAnchor, input]);
+
+  const canSave = linkAnchor
+    ? Boolean(input.trim())
+    : Boolean(parsedReminder?.draft.scheduledAt && input.trim());
+
+  // Grow the popup while any dropdown is open so it isn't clipped; restore on
+  // close. Capture mode only — list/settings own their own height.
+  const menuOpen = slash.isOpen || anchorPicking;
   useEffect(() => {
     if (!isTauriRuntime() || !shouldHideAfterSave) return;
     void invoke("set_popup_height", {
-      height: slash.isOpen ? CAPTURE_WITH_SLASH_HEIGHT : CAPTURE_DEFAULT_HEIGHT,
+      height: menuOpen ? CAPTURE_WITH_SLASH_HEIGHT : CAPTURE_DEFAULT_HEIGHT,
     }).catch(() => undefined);
-  }, [slash.isOpen, shouldHideAfterSave]);
+  }, [menuOpen, shouldHideAfterSave]);
 
   function syncCaret(el: HTMLInputElement) {
     setCaret(el.selectionStart ?? el.value.length);
@@ -100,6 +143,7 @@ export function CapturePage({
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     setInput(event.target.value);
     syncCaret(event.currentTarget);
+    if (anchorPicking) setAnchorIndex(0);
   }
 
   function handleSelect(event: SyntheticEvent<HTMLInputElement>) {
@@ -117,7 +161,82 @@ export function CapturePage({
     });
   }
 
+  /** A command was chosen from the dropdown. `/link` opens the anchor picker
+   *  instead of inserting text; every other command inserts as before. */
+  function chooseCommand(suggestion: SlashCommandSuggestion) {
+    if (suggestion.command.name === "link") {
+      void enterAnchorMode();
+      return;
+    }
+    applySlash(slash.applyCommand(suggestion));
+  }
+
+  async function enterAnchorMode() {
+    setInput("");
+    setCaret(0);
+    setAnchorIndex(0);
+    setLinkAnchor(null);
+    let list: ReminderNode[] = [];
+    if (isTauriRuntime()) {
+      try {
+        list = (await listReminderNodes()).filter(isActionable).sort(byScheduledAt);
+      } catch {
+        // Silent — empty picker shows the "nothing to link to" hint.
+      }
+    }
+    setAnchors(list);
+    setAnchorPicking(true);
+    focusInput(ref.current);
+  }
+
+  function bindAnchor(anchor: ReminderNode) {
+    setLinkAnchor(anchor);
+    setAnchorPicking(false);
+    setAnchors([]);
+    setAnchorIndex(0);
+    setInput("");
+    setCaret(0);
+    focusInput(ref.current);
+  }
+
+  /** Exit the link flow entirely (Esc / chip ✕), back to a normal capture. */
+  function cancelLink() {
+    setLinkAnchor(null);
+    setAnchorPicking(false);
+    setAnchors([]);
+    setAnchorIndex(0);
+    setInput("");
+    setCaret(0);
+    focusInput(ref.current);
+  }
+
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // Phase 2: choosing an anchor.
+    if (anchorPicking) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setAnchorIndex((i) => Math.min(i + 1, filteredAnchors.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setAnchorIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const anchor = filteredAnchors[clampedAnchorIndex];
+        if (anchor) bindAnchor(anchor);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelLink();
+        return;
+      }
+      return; // let other keys type into the filter
+    }
+
     if (slash.isOpen) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -130,10 +249,10 @@ export function CapturePage({
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
-        const result = slash.applySelected();
-        if (result) {
+        const selected = slash.suggestions[slash.selectedIndex];
+        if (selected) {
           event.preventDefault();
-          applySlash(result);
+          chooseCommand(selected);
           return;
         }
       }
@@ -146,6 +265,11 @@ export function CapturePage({
 
     if (event.key !== "Escape") return;
     event.preventDefault();
+    // Phase 3: Esc drops the link first; otherwise dismiss the window.
+    if (linkAnchor) {
+      cancelLink();
+      return;
+    }
     setInput("");
     void hideMainWindow();
   }
@@ -153,15 +277,38 @@ export function CapturePage({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!canSave || !parsedReminder?.draft.scheduledAt) {
+    if (!canSave) {
       focusInput(ref.current);
       return;
     }
-
     if (!isTauriRuntime()) return;
 
     setIsSaving(true);
     try {
+      // Linked save: resolve time off the anchor, create, then link under it.
+      if (linkAnchor) {
+        const link = parseAnchorLink(input, {
+          anchor: linkAnchor.scheduledAt,
+          timezone: linkAnchor.timezone,
+          defaultDirection: "before",
+        });
+        const node = createLinkedReminderNode(link, linkAnchor, input, getDeviceId());
+        await createReminderNodeCommand(node);
+        await moveReminderNode({
+          id: node.id,
+          parentId: linkAnchor.id,
+          updatedAt: new Date().toISOString(),
+        });
+        setInput("");
+        setCaret(0);
+        setLinkAnchor(null);
+        onSaved();
+        if (shouldHideAfterSave) await hideMainWindow();
+        else focusInput(ref.current);
+        return;
+      }
+
+      if (!parsedReminder?.draft.scheduledAt) return;
       const reminder = createReminderNode(parsedReminder, getDeviceId());
       await createReminderNodeCommand(reminder);
 
@@ -203,6 +350,27 @@ export function CapturePage({
         <label className="sr-only" htmlFor="quick-capture-input">
           {strings.menu.capture}
         </label>
+
+        {linkAnchor ? (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex max-w-[60%] items-center gap-1 truncate rounded-full border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-2 py-0.5 text-xs text-[var(--lin-text)]">
+              <span className="truncate">⛓ {linkAnchor.title}</span>
+              <button
+                aria-label={strings.link.chipClear}
+                className="flex-none text-[var(--lin-text-mute)] transition hover:text-[var(--lin-text)]"
+                onClick={cancelLink}
+                tabIndex={-1}
+                type="button"
+              >
+                ✕
+              </button>
+            </span>
+            <span className="truncate text-xs text-[var(--lin-text-mute)]">
+              {strings.link.hint}
+            </span>
+          </div>
+        ) : null}
+
         <HighlightedInput
           inputRef={ref}
           onChange={handleChange}
@@ -211,16 +379,69 @@ export function CapturePage({
           placeholder={strings.placeholder}
           value={input}
         />
+
         <p className="truncate text-xs leading-tight text-[var(--lin-text-dim)]">
-          <PreviewLine
-            isSaving={isSaving}
-            parseResult={parsedReminder}
-            strings={strings}
-          />
+          {linkAnchor ? (
+            linkPreview ? (
+              <>
+                →{" "}
+                <span className="text-[var(--lin-text)]">
+                  {formatDateTime(linkPreview.scheduledAt)}
+                </span>{" "}
+                · {linkPreview.role === "followup" ? "follow-up" : "prep"}
+              </>
+            ) : (
+              strings.link.hint
+            )
+          ) : (
+            <PreviewLine
+              isSaving={isSaving}
+              parseResult={parsedReminder}
+              strings={strings}
+            />
+          )}
         </p>
-        {slash.isOpen ? (
+
+        {anchorPicking ? (
+          <div
+            className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
+            role="listbox"
+          >
+            <div className="px-3 py-1.5 text-xs text-[var(--lin-text-mute)]">
+              {strings.link.pickHeader}
+            </div>
+            {filteredAnchors.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-[var(--lin-text-mute)]">
+                {strings.link.noMatch}
+              </div>
+            ) : (
+              filteredAnchors.map((anchor, index) => (
+                <button
+                  aria-selected={index === clampedAnchorIndex}
+                  className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left transition ${
+                    index === clampedAnchorIndex ? "bg-[var(--lin-bg-hover)]" : ""
+                  }`}
+                  key={anchor.id}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    bindAnchor(anchor);
+                  }}
+                  role="option"
+                  type="button"
+                >
+                  <span className="truncate text-sm text-[var(--lin-text)]">
+                    {anchor.title}
+                  </span>
+                  <span className="flex-none whitespace-nowrap text-xs text-[var(--lin-text-dim)]">
+                    {formatDateTime(anchor.scheduledAt)}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        ) : slash.isOpen ? (
           <SlashCommandMenu
-            onPick={(suggestion) => applySlash(slash.applyCommand(suggestion))}
+            onPick={chooseCommand}
             selectedIndex={slash.selectedIndex}
             suggestions={slash.suggestions}
           />

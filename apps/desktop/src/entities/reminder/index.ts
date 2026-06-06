@@ -20,6 +20,7 @@ export {
 } from "./api/commands";
 export {
   byScheduledAt,
+  createLinkedReminderNode,
   createReminderNode,
   isActionable,
 } from "./model/reminder";

@@ -50,17 +50,52 @@ interface CategoryMenuState {
   y: number;
 }
 
-/** Depth-first flatten of a category's roots into rows, tracking each row's
- * parent row index so the connectors can be drawn. */
+/** Effective time for ordering/display — a snooze moves the reminder. */
+function effTime(node: ReminderNode): string {
+  return node.snoozedUntil ?? node.scheduledAt;
+}
+
+/**
+ * Flatten a category's roots into time-ordered rows.
+ *
+ * Within each node, children earlier than it (preps) render ABOVE it, later ones
+ * (follow-ups) BELOW — both sorted by time, recursively — so the vertical order
+ * reads chronologically. Depth still maps to indentation, so recursive `/link`
+ * chains keep their level legible (the connector points up or down accordingly).
+ *
+ * Two passes: emit rows in order recording each row's parent id, then resolve
+ * parent ids to row indices (a parent can now sit *below* its earlier children,
+ * so its index isn't known at emit time).
+ */
 function flattenChains(roots: ChainNode[]): FlatRow[] {
-  const rows: FlatRow[] = [];
-  const walk = (chain: ChainNode, depth: number, parentIndex: number | null) => {
-    const index = rows.length;
-    rows.push({ node: chain.node, depth, parentIndex });
-    chain.children.forEach((child) => walk(child, depth + 1, index));
+  const ordered: Array<{ node: ReminderNode; depth: number; parentId: string | null }> = [];
+
+  const walk = (chain: ChainNode, depth: number, parentId: string | null) => {
+    const kids = [...chain.children].sort((a, b) =>
+      effTime(a.node).localeCompare(effTime(b.node)),
+    );
+    const t = effTime(chain.node);
+    kids
+      .filter((c) => effTime(c.node).localeCompare(t) < 0)
+      .forEach((c) => walk(c, depth + 1, chain.node.id));
+    ordered.push({ node: chain.node, depth, parentId });
+    kids
+      .filter((c) => effTime(c.node).localeCompare(t) >= 0)
+      .forEach((c) => walk(c, depth + 1, chain.node.id));
   };
-  roots.forEach((root) => walk(root, 0, null));
-  return rows;
+
+  [...roots]
+    .sort((a, b) => effTime(a.node).localeCompare(effTime(b.node)))
+    .forEach((root) => walk(root, 0, null));
+
+  const indexById = new Map<string, number>();
+  ordered.forEach((row, i) => indexById.set(row.node.id, i));
+  return ordered.map((row) => ({
+    node: row.node,
+    depth: row.depth,
+    parentIndex:
+      row.parentId !== null ? indexById.get(row.parentId) ?? null : null,
+  }));
 }
 
 /** Every done/cancelled node id across the whole forest (all depths). These
@@ -82,9 +117,11 @@ function collectClearableIds(roots: ChainNode[]): string[] {
 const laneX = (depth: number) => BASE_X + depth * INDENT;
 const rowY = (index: number) => index * ROW_H + ROW_H / 2;
 
-/** Vertical down the parent's lane, rounding into the child's lane at its row. */
+/** From the parent's lane, run vertically toward the child's row (down for a
+ * follow-up, up for a prep) then round into the child's lane. */
 function elbow(parentX: number, parentY: number, childX: number, childY: number): string {
-  return `M ${parentX} ${parentY} L ${parentX} ${childY - 10} Q ${parentX} ${childY} ${parentX + 10} ${childY} L ${childX - 8} ${childY}`;
+  const approach = childY >= parentY ? childY - 10 : childY + 10;
+  return `M ${parentX} ${parentY} L ${parentX} ${approach} Q ${parentX} ${childY} ${parentX + 10} ${childY} L ${childX - 8} ${childY}`;
 }
 
 export function ChainPage({

@@ -232,6 +232,125 @@ export function parseReminderWithNow(
   };
 }
 
+/** Direction a linked reminder sits relative to its anchor in time. */
+export type LinkDirection = "before" | "after";
+
+export interface ParseAnchorLinkOptions {
+  /** ISO instant of the anchor reminder this one links to. */
+  anchor: IsoDateTimeString;
+  timezone?: IanaTimezone;
+  /** Direction to assume when the text says neither before nor after. */
+  defaultDirection?: LinkDirection;
+}
+
+export interface AnchorLinkResult {
+  title: string;
+  scheduledAt: IsoDateTimeString;
+  /** Resolved direction (explicit word, else comparison, else the default). */
+  direction: LinkDirection;
+  /** Derived role: before → prep, after → followup. Position is the source of
+   *  truth; the chain view shows it by placement, not a stored tag. */
+  role: "prep" | "followup";
+  /** How the time was expressed: a relative offset vs an absolute clock time. */
+  kind: "offset" | "absolute";
+  /** Present for `kind: "offset"`. Signed is implied by `direction`. */
+  offsetMs?: number;
+  issues: ParserIssue[];
+}
+
+const LINK_BEFORE_WORDS = /\b(before|sebelum)\b/i;
+const LINK_AFTER_WORDS = /\b(after|setelah|sesudah)\b/i;
+
+/**
+ * Parse the message of a `/link`-ed reminder, resolving its time **relative to
+ * the anchor** rather than to now.
+ *
+ * - `30m before` / `1 jam after` → anchor ∓ offset (sign from the direction
+ *   word, else `defaultDirection`).
+ * - an absolute clock time (`jam 9`, `8am`, `19:00`) → that time on the
+ *   anchor's local date; the direction is then derived by comparison.
+ *
+ * The parser stays anchor-agnostic everywhere else; this is the single entry the
+ * capture layer calls once an anchor has been picked. Role is derived from the
+ * final direction so it can never contradict the scheduled time.
+ */
+export function parseAnchorLink(
+  rawInput: string,
+  options: ParseAnchorLinkOptions,
+): AnchorLinkResult {
+  const timezone = options.timezone ?? getLocalTimezone();
+  const normalized = normalizeReminderInput(rawInput);
+  const anchorDate = coerceDate(options.anchor);
+  const anchorParts = getLocalParts(anchorDate, timezone);
+
+  let direction: LinkDirection = options.defaultDirection ?? "before";
+  if (LINK_AFTER_WORDS.test(normalized)) direction = "after";
+  else if (LINK_BEFORE_WORDS.test(normalized)) direction = "before";
+
+  const issues: ParserIssue[] = [];
+  const segments: TextSegment[] = [];
+
+  let scheduledAt: IsoDateTimeString;
+  let kind: "offset" | "absolute";
+  let offsetMs: number | undefined;
+
+  const time = findClockTime(normalized);
+  if (time) {
+    kind = "absolute";
+    scheduledAt = localDateTimeToUtcIso(
+      {
+        year: anchorParts.year,
+        month: anchorParts.month,
+        day: anchorParts.day,
+        hour: time.parts.hour,
+        minute: time.parts.minute,
+        second: 0,
+      },
+      timezone,
+    );
+    segments.push(time.segment);
+    if (time.issue) issues.push(time.issue);
+    // An explicit clock time wins over a direction word — derive direction from
+    // where it actually lands.
+    direction =
+      coerceDate(scheduledAt).getTime() < anchorDate.getTime() ? "before" : "after";
+  } else {
+    const relative = findRelativeTime(normalized);
+    if (relative) {
+      kind = "offset";
+      offsetMs = relative.ms;
+      const sign = direction === "before" ? -1 : 1;
+      scheduledAt = new Date(anchorDate.getTime() + sign * relative.ms).toISOString();
+      segments.push(relative.segment);
+    } else {
+      // No time at all — sit it at the anchor's instant and flag it, rather than
+      // refusing to link.
+      kind = "offset";
+      offsetMs = 0;
+      scheduledAt = anchorDate.toISOString();
+      issues.push({
+        code: "missing_time",
+        message: "No offset or time found; linked at the anchor's time.",
+      });
+    }
+  }
+
+  const titleSource = removeSegments(normalized, segments)
+    .replace(LINK_BEFORE_WORDS, " ")
+    .replace(LINK_AFTER_WORDS, " ");
+  const title = cleanTitle(titleSource) || "Reminder";
+
+  return {
+    title,
+    scheduledAt,
+    direction,
+    role: direction === "before" ? "prep" : "followup",
+    kind,
+    offsetMs,
+    issues,
+  };
+}
+
 function parseDateTime(
   input: string,
   now: Date,

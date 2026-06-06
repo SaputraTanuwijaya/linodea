@@ -101,6 +101,14 @@ export interface Strings {
   slash: {
     countdown: { label: string; description: string };
     recur: { label: string; description: string };
+    link: { label: string; description: string };
+  };
+  /** /link anchor picker (phase 2 of the dropdown) + the bound-anchor chip. */
+  link: {
+    pickHeader: string;
+    noMatch: string;
+    hint: string;
+    chipClear: string;
   };
   /** On-screen countdown timer window. */
   timer: {
@@ -213,6 +221,16 @@ const STRINGS: Record<LanguageId, Strings> = {
         label: "/recur",
         description: "Repeat a reminder — e.g. every monday 8am, every 2 days 9am ×5.",
       },
+      link: {
+        label: "/link",
+        description: "Attach to a reminder — time counts from it (e.g. 30m before, 1 jam after).",
+      },
+    },
+    link: {
+      pickHeader: "Link to which reminder?",
+      noMatch: "No reminders to link to yet.",
+      hint: "before = prep, after = follow-up",
+      chipClear: "Remove link",
     },
     timer: {
       caption: "Countdown",
@@ -318,6 +336,16 @@ const STRINGS: Record<LanguageId, Strings> = {
         label: "/recur",
         description: "Ulangi pengingat — mis. tiap hari jam 7, every 2 days 9am ×5.",
       },
+      link: {
+        label: "/link",
+        description: "Tautkan ke pengingat lain — waktunya dihitung dari situ (mis. 30m before, 1 jam after).",
+      },
+    },
+    link: {
+      pickHeader: "Tautkan ke pengingat mana?",
+      noMatch: "Belum ada pengingat untuk ditautkan.",
+      hint: "before = prep, after = follow-up",
+      chipClear: "Hapus tautan",
     },
     timer: {
       caption: "Hitung mundur",
