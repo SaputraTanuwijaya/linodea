@@ -331,6 +331,86 @@ for (const phrase of [
   });
 }
 
+// --- Number words (spelled-out integers, EN + ID) ---
+
+test("English spelled relative days parse (in three days)", () => {
+  const result = parseReminderWithNow("in three days submit report", options);
+
+  // Same instant as the digit fixture "in 3 days submit report".
+  assert.equal(result.draft.scheduledAt, "2026-05-24T18:00:00.000Z");
+  assert.equal(result.draft.title, "submit report");
+});
+
+test("Indonesian spelled relative days parse (tiga hari lagi)", () => {
+  const result = parseReminderWithNow("tiga hari lagi makan", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-24T18:00:00.000Z");
+  assert.equal(result.draft.title, "makan");
+});
+
+test("Indonesian se- fused prefix parses (sejam lagi)", () => {
+  const result = parseReminderWithNow("sejam lagi standup", options);
+
+  // +1 hour from 18:00:00Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-21T19:00:00.000Z");
+  assert.equal(result.draft.title, "standup");
+});
+
+test("English article a/an behind 'in' means one (in a minute)", () => {
+  const result = parseReminderWithNow("in a minute call mom", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T18:01:00.000Z");
+  assert.equal(result.draft.title, "call mom");
+});
+
+test("English 'in an hour' parses", () => {
+  const result = parseReminderWithNow("in an hour take a break", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-21T19:00:00.000Z");
+  assert.equal(result.draft.title, "take a break");
+});
+
+test("two-word Indonesian number resolves (dua belas jam lagi)", () => {
+  const result = parseReminderWithNow("dua belas jam lagi cek hasil", options);
+
+  // +12 hours from 18:00:00Z.
+  assert.equal(result.draft.scheduledAt, "2026-05-22T06:00:00.000Z");
+  assert.equal(result.draft.title, "cek hasil");
+});
+
+test("spelled interval recurrence parses (every two weeks)", () => {
+  const result = parseReminderWithNow("every two weeks 8am sync", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-22T01:00:00.000Z");
+  assert.equal(result.draft.title, "sync");
+  assert.deepEqual(result.recurrence, { freq: "weekly", interval: 2 });
+});
+
+test("spelled repeat count parses (sebanyak tiga kali)", () => {
+  const result = parseReminderWithNow(
+    "setiap minggu 19:00 sync sebanyak tiga kali",
+    options,
+  );
+
+  assert.equal(result.draft.scheduledAt, "2026-05-22T12:00:00.000Z");
+  assert.equal(result.draft.title, "sync");
+  assert.deepEqual(result.recurrence, { freq: "weekly", interval: 1, count: 3 });
+});
+
+// Negatives — the unit/cadence guard + the `in` guard on a/an keep number words
+// from inventing schedules out of ordinary titles.
+test("bare 'a <unit>' without 'in' is not a duration (take a day off)", () => {
+  const result = parseReminderWithNow("take a day off to relax", options);
+
+  assert.equal(result.draft.scheduledAt, undefined);
+});
+
+test("spelled number with no unit is not a duration (buy three apples)", () => {
+  const result = parseReminderWithNow("buy three apples", options);
+
+  assert.equal(result.draft.scheduledAt, undefined);
+});
+
 // --- Recurring reminders (S36) ---
 // `options` now = 2026-05-21T18:00:00Z == Fri 2026-05-22 01:00 Jakarta.
 

@@ -19,6 +19,8 @@ import {
   CHECKLIST_CUES,
   DATE_WORDS,
   ID_TIME_MARKERS,
+  NUMBER_WORDS,
+  numberWordValue,
   TYPE_COOLDOWN_WORDS,
   TYPE_DEADLINE_WORDS,
   TYPE_FOLLOWUP_WORDS,
@@ -394,27 +396,92 @@ const RELATIVE_UNITS =
   "seconds|second|secs|sec|detik|dtk|s|minutes|minute|mins|min|menit|m|hours|hour|hrs|hr|jam|h|days|day|hari|d";
 
 /**
+ * Regex alternation of every spelled-out number word, longest spelling first so
+ * `dua belas` (12) wins over a bare `dua` (2) and `seventeen` over `seven`.
+ * Used in the amount slots alongside `\d{1,3}` (see `AMOUNT`). The words are
+ * plain letters/spaces — no regex metacharacters to escape.
+ */
+const NUMBER_WORD_ALTERNATION = NUMBER_WORDS.map((entry) => entry.word)
+  .sort((a, b) => b.length - a.length)
+  .join("|");
+
+/** A number slot: bare digits or a spelled-out number word. */
+const AMOUNT = `\\d{1,3}|${NUMBER_WORD_ALTERNATION}`;
+
+/**
+ * Resolve a captured amount token (digits or a spelled number word) to an
+ * integer. Returns NaN for anything unrecognized so callers can guard.
+ */
+function amountToNumber(token: string): number {
+  if (/^\d+$/.test(token)) return Number(token);
+  return numberWordValue(token) ?? Number.NaN;
+}
+
+/**
+ * The Indonesian `se-` prefix fused onto a unit means "one of" it: `sejam` = 1
+ * hour, `sehari` = 1 day, `semenit`/`sedetik` = 1 minute/second. Only the units
+ * the relative matcher supports are listed (weeks/months aren't relative units).
+ * Distinct words that merely start with `se` — `sepuluh` (10), `sebelas` (11),
+ * `sembilan` (9) — don't match because the unit list is enumerated explicitly.
+ */
+const SE_PREFIX_UNITS = "detik|menit|jam|hari";
+
+/**
  * Match a relative duration. The `in` prefix (EN) and `lagi` suffix (ID) are
  * both optional, so `in 2 minutes`, `2 minutes lagi`, `5m`, `30 detik`, and
- * `in 3 days` all parse. Returns the duration in milliseconds so sub-minute
- * values (seconds) survive.
+ * `in 3 days` all parse. Spelled numbers work too (`in three days`,
+ * `tiga hari lagi`), plus the ID `se-` idiom (`sejam lagi`) and English
+ * `in a/an <unit>` (`in a minute`, `in an hour`). Returns the duration in
+ * milliseconds so sub-minute values (seconds) survive. When several forms could
+ * match, the earliest in the text wins (deterministic, matches reading order).
  */
 function findRelativeTime(input: string):
   | { ms: number; segment: TextSegment }
   | undefined {
-  const pattern = new RegExp(
-    `\\b(?:in\\s+)?(\\d{1,3})\\s*(${RELATIVE_UNITS})\\b(?:\\s+lagi)?`,
+  const candidates: Array<{ ms: number; segment: TextSegment }> = [];
+
+  // Primary: digits or a spelled number word, then a unit.
+  const main = new RegExp(
+    `\\b(?:in\\s+)?(${AMOUNT})\\s*(${RELATIVE_UNITS})\\b(?:\\s+lagi)?`,
     "i",
-  );
-  const match = pattern.exec(input);
-  if (!match || match.index === undefined) {
-    return undefined;
+  ).exec(input);
+  if (main?.index !== undefined) {
+    const amount = amountToNumber(main[1]);
+    if (!Number.isNaN(amount)) {
+      candidates.push({
+        ms: relativeUnitToMs(amount, main[2]),
+        segment: { start: main.index, end: main.index + main[0].length },
+      });
+    }
   }
 
-  return {
-    ms: relativeUnitToMs(Number(match[1]), match[2]),
-    segment: { start: match.index, end: match.index + match[0].length },
-  };
+  // ID `se-` fused prefix: `sejam lagi`, `in sehari` → amount 1.
+  const se = new RegExp(
+    `\\b(?:in\\s+)?se(${SE_PREFIX_UNITS})\\b(?:\\s+lagi)?`,
+    "i",
+  ).exec(input);
+  if (se?.index !== undefined) {
+    candidates.push({
+      ms: relativeUnitToMs(1, se[1]),
+      segment: { start: se.index, end: se.index + se[0].length },
+    });
+  }
+
+  // English `a`/`an` → 1, but only behind an explicit `in` (bare `a day` is far
+  // too common in titles to treat as a duration).
+  const article = new RegExp(`\\bin\\s+an?\\s+(${RELATIVE_UNITS})\\b`, "i").exec(
+    input,
+  );
+  if (article?.index !== undefined) {
+    candidates.push({
+      ms: relativeUnitToMs(1, article[1]),
+      segment: { start: article.index, end: article.index + article[0].length },
+    });
+  }
+
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => a.segment.start - b.segment.start);
+  return candidates[0];
 }
 
 /** Weekday name → index (0 = Sunday). EN full + 3-letter; ID full. */
@@ -470,16 +537,20 @@ function matchCadence(
     segment: { start: match.index, end: match.index + match[0].length },
   });
 
-  // Interval forms first (they carry a number): "every 2 weeks", "tiap 3 hari".
-  const interval =
-    /\b(?:every|each|tiap|setiap)\s+(\d{1,3})\s+(days?|weeks?|months?|hari|minggu|bulan)\b/i.exec(
-      input,
-    );
+  // Interval forms first (they carry a number): "every 2 weeks", "tiap 3 hari",
+  // "every two weeks", "tiap dua minggu".
+  const interval = new RegExp(
+    `\\b(?:every|each|tiap|setiap)\\s+(${AMOUNT})\\s+(days?|weeks?|months?|hari|minggu|bulan)\\b`,
+    "i",
+  ).exec(input);
   if (interval?.index !== undefined) {
-    return make(interval, {
-      freq: UNIT_TO_FREQ[interval[2].toLowerCase()],
-      interval: Math.max(1, Number(interval[1])),
-    });
+    const value = amountToNumber(interval[1]);
+    if (!Number.isNaN(value)) {
+      return make(interval, {
+        freq: UNIT_TO_FREQ[interval[2].toLowerCase()],
+        interval: Math.max(1, value),
+      });
+    }
   }
 
   // "every other week/day/month" → interval 2.
@@ -520,18 +591,22 @@ function matchCadence(
   return undefined;
 }
 
-/** Match a repeat count: `×5`, `x5`, `5 times`, `5 kali`, `sebanyak 5 kali`. */
+/**
+ * Match a repeat count: `×5`, `x5`, `5 times`, `5 kali`, `sebanyak 5 kali`, and
+ * the spelled forms `three times` / `sebanyak tiga kali`. The `×`/`x` glyph
+ * forms stay digit-only (nobody writes `×three`).
+ */
 function findCount(input: string): { value: number; segment: TextSegment } | undefined {
   const patterns = [
-    /\bsebanyak\s+(\d{1,3})\s+kali\b/i,
-    /\b(\d{1,3})\s*(?:times|kali)\b/i,
+    new RegExp(`\\bsebanyak\\s+(${AMOUNT})\\s+kali\\b`, "i"),
+    new RegExp(`\\b(${AMOUNT})\\s*(?:times|kali)\\b`, "i"),
     /(?:^|\s)[×x]\s*(\d{1,3})\b/i,
     /\b(\d{1,3})\s*[×x]\b/i,
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(input);
     if (match?.index !== undefined) {
-      const value = Number(match[1]);
+      const value = amountToNumber(match[1]);
       if (value >= 1) {
         return {
           value,

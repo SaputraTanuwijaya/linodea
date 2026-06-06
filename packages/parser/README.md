@@ -25,6 +25,7 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 
 - Units: **seconds** (`s`, `sec`, `detik`, `dtk`), **minutes** (`m`, `min`, `menit`), **hours** (`h`, `hr`, `jam`), **days** (`d`, `day`, `hari`).
 - The `in` prefix (EN) and `lagi` suffix (ID) are **optional**: `in 30m`, `5m`, `2 minutes`, `30 detik`, `2 jam lagi`, `in 3 days` all parse. A trailing word boundary after the unit guards against false matches (`run 5 miles`, `buy 2 apples` don't match).
+- **Spelled-out numbers** work anywhere a digit does (relative duration, recurrence interval, repeat count): `in three days`, `tiga hari lagi`, `every two weeks`, `sebanyak tiga kali`. Plus the Indonesian fused `se-` idiom — `sejam lagi` / `sehari lagi` = "in one hour/day" (units `detik/menit/jam/hari` only) — and English `in a/an <unit>` (`in a minute`, `in an hour`). The unit/cadence keyword that always follows is the precision guard, so ordinary titles (`buy three apples`, `call one person`) don't match. `a`/`an` additionally require the explicit `in` prefix (bare `take a day off` is not a duration). The number lexicon lives in `vocabularies.ts` (`NUMBER_WORDS`). **Scope:** single-token words + tens (EN `one`–`nineteen`, `twenty`–`ninety`; ID `satu`–`dua belas`). Compounds (`twenty-five`, `dua puluh lima`) and fractions (`half an hour`) are out of scope.
 - Relative reminders **snap to the nearest minute (`:00`)** by default, so firing is clean and predictable. Add the keyword **`/countdown`** anywhere in the input to keep the exact second instead (typed at `:47` → fires at `:47`); the keyword is stripped from the title. **Sub-minute durations always keep exact seconds** (snapping a 30s reminder to `:00` would be nonsense). The bare command name is exported as `COUNTDOWN_COMMAND_NAME` (single source of truth shared with the desktop slash-command registry), and `parseReminder` surfaces a `countdown: boolean` on its result so the UI can show the on-screen countdown timer.
 
 ### Date words
@@ -112,8 +113,9 @@ Autocorrects cost confidence at half the rate of hard issues (0.05 per correctio
 ## Known limits
 
 - No natural-language grammar beyond the listed rules.
-- No recurring reminders.
 - No absolute calendar dates like `June 5`.
+- Relative duration units are seconds/minutes/hours/days only — `in 3 weeks` / `in three months` don't parse as one-offs (weeks/months exist only as recurrence cadences). Affects digits and spelled numbers equally.
+- Spelled numbers cap at single tokens + tens — no compounds (`twenty-five`) or fractions (`half`).
 - `H-1` marks type as `prep` but does not infer scheduled time without an anchor event.
 - Time-only reminders schedule the next occurrence and emit `ambiguous_date`.
 - `scheduledAt` is UTC ISO; `timezone` records the intended local timezone.
