@@ -55,7 +55,7 @@ import {
   moveReminderNode,
 } from "@/entities/reminder";
 import type { Strings } from "@/shared/i18n";
-import { formatDateTime, getDeviceId, isTauriRuntime } from "@/shared/lib";
+import { formatDateTime, getDeviceId, isTauriRuntime, playUiSound } from "@/shared/lib";
 
 const CAPTURE_DEFAULT_HEIGHT = 130;
 const CAPTURE_WITH_SLASH_HEIGHT = 240;
@@ -278,6 +278,7 @@ export function CapturePage({
     event.preventDefault();
 
     if (!canSave) {
+      if (input.trim()) playUiSound("captureError");
       focusInput(ref.current);
       return;
     }

@@ -226,9 +226,9 @@ function App() {
       <div className="relative w-[560px]" onContextMenu={handleContextMenu}>
         <img
           alt=""
-          className="pointer-events-none absolute -left-3 -top-3 z-10 h-12 w-12 select-none drop-shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+          className="pointer-events-none absolute -left-5 -top-7 z-10 h-20 w-20 rotate-[8deg] select-none object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
           draggable={false}
-          src="/tauri-logo.png"
+          src="/brand/logo.png"
         />
 
         <CapturePage

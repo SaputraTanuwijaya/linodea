@@ -24,7 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 import { clearReminderFireRecord, updateReminderNodeStatus } from "@/entities/reminder";
 import { getStoredLanguage } from "@/features/language";
 import { stringsFor } from "@/shared/i18n";
-import { formatDateTime } from "@/shared/lib";
+import { formatDateTime, playUiSound } from "@/shared/lib";
 
 const NOTIFY_EVENT = "linodea:notify";
 const AUTO_DISMISS_MS = 8_000;
@@ -66,6 +66,7 @@ export function AlertPage() {
       void invoke("dismiss_alert").catch(() => undefined);
       return;
     }
+    playUiSound("notification");
     const id = window.setTimeout(() => setQueue((q) => q.slice(1)), AUTO_DISMISS_MS);
     return () => window.clearTimeout(id);
   }, [current]);

@@ -7,3 +7,4 @@
 export { formatDateTime } from "./datetime";
 export { getDeviceId } from "./device";
 export { isTauriRuntime } from "./runtime";
+export { playUiSound } from "./sounds";
