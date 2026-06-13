@@ -13,6 +13,7 @@ import {
   readAiAssistConfig,
   writeAiAssistConfig,
 } from "./config";
+import { isAvailableAiProvider } from "./providers";
 import type {
   AiAssistConfig,
   AiAssistController,
@@ -53,7 +54,10 @@ export function useAiAssist(): AiAssistController {
 
   const updateConfig = useCallback((patch: Partial<AiAssistConfig>) => {
     setState((current) => {
-      const config = persistConfig({ ...current.config, ...patch, provider: "gemini" });
+      const provider = isAvailableAiProvider(patch.provider)
+        ? patch.provider
+        : current.config.provider;
+      const config = persistConfig({ ...current.config, ...patch, provider });
       return { ...current, config, error: null };
     });
   }, []);
@@ -132,6 +136,9 @@ export function useAiAssist(): AiAssistController {
 
   const normalize = useCallback(
     async (request: Omit<AiNormalizationRequest, "model">) => {
+      if (state.config.provider !== "gemini") {
+        throw { code: "unavailable", message: "This AI provider is not available yet." };
+      }
       const model = state.config.model;
       if (!model) {
         throw { code: "unsupported_model", message: "Select a Gemini model." };
@@ -144,7 +151,7 @@ export function useAiAssist(): AiAssistController {
         throw normalizedError;
       }
     },
-    [state.config.model],
+    [state.config.model, state.config.provider],
   );
 
   const clearError = useCallback(() => {

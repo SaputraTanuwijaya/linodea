@@ -1,10 +1,11 @@
 import type { ParserIssueCode } from "@linodea/types";
 
 export type AiActivationMode = "fallback";
+export type AiProviderId = "gemini" | "openai" | "anthropic";
 
 export interface AiAssistConfig {
   enabled: boolean;
-  provider: "gemini";
+  provider: AiProviderId;
   model: string | null;
   activation: AiActivationMode;
 }

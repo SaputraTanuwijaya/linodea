@@ -92,6 +92,10 @@ export function CapturePage({
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [placeholder, setPlaceholder] = useState(
+    strings.placeholders[0] ?? "",
+  );
+  const placeholderIndex = useRef(0);
   const [isAiResolving, setIsAiResolving] = useState(false);
   const [aiPreview, setAiPreview] = useState<{
     sourceInput: string;
@@ -112,6 +116,26 @@ export function CapturePage({
   const ref = inputRef ?? internalRef;
 
   const slash = useSlashCommands(input, caret, strings);
+
+  useEffect(() => {
+    const examples = strings.placeholders;
+    if (examples.length === 0) {
+      setPlaceholder("");
+      return;
+    }
+
+    placeholderIndex.current = Math.floor(Math.random() * examples.length);
+    setPlaceholder(examples[placeholderIndex.current]);
+
+    function rotatePlaceholder() {
+      placeholderIndex.current =
+        (placeholderIndex.current + 1) % examples.length;
+      setPlaceholder(examples[placeholderIndex.current]);
+    }
+
+    window.addEventListener("focus", rotatePlaceholder);
+    return () => window.removeEventListener("focus", rotatePlaceholder);
+  }, [strings.placeholders]);
 
   const filteredAnchors = useMemo(() => {
     const q = input.trim().toLowerCase();
@@ -511,7 +535,7 @@ export function CapturePage({
           onChange={handleChange}
           onKeyDown={handleInputKeyDown}
           onSelect={handleSelect}
-          placeholder={strings.placeholder}
+          placeholder={placeholder}
           value={input}
         />
 

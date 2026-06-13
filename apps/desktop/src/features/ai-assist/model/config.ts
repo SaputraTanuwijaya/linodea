@@ -1,4 +1,5 @@
 import type { AiAssistConfig, AiModel } from "./types";
+import { isAvailableAiProvider } from "./providers";
 
 const STORAGE_KEY = "linodea.aiAssist.v1";
 
@@ -16,7 +17,9 @@ export function readAiAssistConfig(): AiAssistConfig {
     const parsed = JSON.parse(raw) as Partial<AiAssistConfig>;
     return {
       enabled: parsed.enabled === true,
-      provider: "gemini",
+      provider: isAvailableAiProvider(parsed.provider)
+        ? parsed.provider
+        : DEFAULT_AI_ASSIST_CONFIG.provider,
       model: typeof parsed.model === "string" ? parsed.model : null,
       activation: "fallback",
     };

@@ -273,6 +273,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(AppState {

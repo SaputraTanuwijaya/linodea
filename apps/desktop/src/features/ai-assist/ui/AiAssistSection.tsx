@@ -1,8 +1,12 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 
 import type { Strings } from "@/shared/i18n";
+import { isTauriRuntime } from "@/shared/lib";
 
-import type { AiAssistController } from "../model/types";
+import { AI_PROVIDERS } from "../model/providers";
+import type { AiAssistController, AiProviderId } from "../model/types";
 
 const AI_STUDIO_URL = "https://aistudio.google.com/apikey";
 
@@ -15,7 +19,7 @@ export function AiAssistSection({
 }) {
   const { state } = controller;
   const [apiKey, setApiKey] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(!state.status.configured);
   const [guideOpen, setGuideOpen] = useState(!state.status.configured);
   const attemptedRefresh = useRef(false);
 
@@ -30,17 +34,18 @@ export function AiAssistSection({
     }
   }, [controller, state.models.length, state.status.configured]);
 
+  useEffect(() => {
+    setConnectionOpen(!state.status.configured);
+    setGuideOpen(!state.status.configured);
+  }, [state.status.configured]);
+
   const available = state.status.available;
   const configured = state.status.configured;
 
-  async function copySetupLink() {
-    try {
-      await navigator.clipboard.writeText(AI_STUDIO_URL);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
+  async function openAiStudio(event: MouseEvent<HTMLAnchorElement>) {
+    if (!isTauriRuntime()) return;
+    event.preventDefault();
+    await openUrl(AI_STUDIO_URL);
   }
 
   return (
@@ -75,138 +80,158 @@ export function AiAssistSection({
         </button>
       </div>
 
-      <section className="grid gap-3" aria-labelledby="gemini-provider-title">
+      <section className="grid gap-2" aria-labelledby="ai-provider-label">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs text-[var(--lin-text-dim)]">
-              {strings.ai.providerLabel}
-            </p>
-            <h2
-              className="text-sm font-medium text-[var(--lin-text)]"
-              id="gemini-provider-title"
-            >
-              Google Gemini
-            </h2>
-          </div>
-          <span
-            className={`rounded-full border px-2 py-1 text-[11px] ${
-              configured
-                ? "border-emerald-500/40 text-emerald-400"
-                : "border-[var(--lin-border)] text-[var(--lin-text-mute)]"
-            }`}
+          <label
+            className="text-xs font-medium text-[var(--lin-text)]"
+            htmlFor="ai-provider"
+            id="ai-provider-label"
           >
+            {strings.ai.providerLabel}
+          </label>
+          <span className="inline-flex items-center gap-1.5 text-xs text-[var(--lin-text-dim)]">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                configured ? "bg-emerald-400" : "bg-[var(--lin-text-mute)]"
+              }`}
+            />
             {configured ? strings.ai.configured : strings.ai.notConfigured}
           </span>
         </div>
+        <select
+          className="h-10 min-w-0 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg)] px-2.5 text-sm text-[var(--lin-text)] outline-none focus:border-[var(--lin-text-dim)]"
+          id="ai-provider"
+          onChange={(event) =>
+            controller.updateConfig({ provider: event.target.value as AiProviderId })
+          }
+          value={state.config.provider}
+        >
+          {AI_PROVIDERS.map((provider) => (
+            <option disabled={!provider.available} key={provider.id} value={provider.id}>
+              {provider.name}
+              {provider.recommended ? ` - ${strings.ai.recommended}` : ""}
+              {!provider.available ? ` - ${strings.ai.comingLater}` : ""}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs leading-5 text-[var(--lin-text-dim)]">
+          {strings.ai.providerHint}
+        </p>
+      </section>
 
-        <label className="grid gap-1.5">
-          <span className="flex items-center gap-1.5 text-xs text-[var(--lin-text-dim)]">
-            {strings.ai.apiKeyLabel}
+      <section className="grid gap-3 border-t border-[var(--lin-border)] pt-4">
+        {configured && !connectionOpen ? (
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-xs leading-5 text-[var(--lin-text-dim)]">
+              {strings.ai.connectionStored}
+            </p>
             <button
-              aria-expanded={guideOpen}
-              aria-label={guideOpen ? strings.ai.hideSetup : strings.ai.showSetup}
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--lin-border)] text-[10px] text-[var(--lin-text-dim)] hover:border-[var(--lin-text-dim)] hover:text-[var(--lin-text)]"
-              onClick={(event) => {
-                event.preventDefault();
-                setGuideOpen((open) => !open);
+              className="shrink-0 text-xs text-[var(--lin-text-dim)] underline decoration-[var(--lin-border)] underline-offset-4 hover:text-[var(--lin-text)]"
+              onClick={() => setConnectionOpen(true)}
+              type="button"
+            >
+              {strings.ai.manageConnection}
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <label
+                className="text-xs font-medium text-[var(--lin-text)]"
+                htmlFor="ai-api-key"
+              >
+                {strings.ai.apiKeyLabel}
+              </label>
+              {configured ? (
+                <button
+                  className="text-xs text-[var(--lin-text-dim)] underline decoration-[var(--lin-border)] underline-offset-4 hover:text-[var(--lin-text)]"
+                  onClick={() => setConnectionOpen(false)}
+                  type="button"
+                >
+                  {strings.ai.hideConnection}
+                </button>
+              ) : null}
+            </div>
+            <input
+              autoComplete="off"
+              className="h-10 min-w-0 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg)] px-3 text-sm text-[var(--lin-text)] outline-none focus:border-[var(--lin-text-dim)]"
+              disabled={!available || state.isConfiguring}
+              id="ai-api-key"
+              onChange={(event) => {
+                setApiKey(event.target.value);
+                controller.clearError();
               }}
-              title={strings.ai.setupTitle}
-              type="button"
-            >
-              ?
-            </button>
-          </span>
-          <input
-            autoComplete="off"
-            className="h-10 min-w-0 rounded-md border border-[var(--lin-border)] bg-[var(--lin-bg)] px-3 text-sm text-[var(--lin-text)] outline-none focus:border-[var(--lin-text-dim)]"
-            disabled={!available || state.isConfiguring}
-            onChange={(event) => {
-              setApiKey(event.target.value);
-              controller.clearError();
-            }}
-            placeholder={configured ? strings.ai.keyStored : strings.ai.apiKeyPlaceholder}
-            type="password"
-            value={apiKey}
-          />
-        </label>
+              placeholder={configured ? strings.ai.keyStored : strings.ai.apiKeyPlaceholder}
+              type="password"
+              value={apiKey}
+            />
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            className="rounded-md bg-[var(--lin-accent)] px-3 py-2 text-xs font-medium text-[var(--lin-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!available || !apiKey.trim() || state.isConfiguring}
-            onClick={async () => {
-              const saved = await controller.saveApiKey(apiKey);
-              if (saved) {
-                setApiKey("");
-                setGuideOpen(false);
-              }
-            }}
-            type="button"
-          >
-            {state.isConfiguring ? strings.ai.testing : strings.ai.saveAndTest}
-          </button>
-          {configured ? (
-            <button
-              className="rounded-md border border-[var(--lin-border)] px-3 py-2 text-xs text-[var(--lin-danger)] disabled:opacity-50"
-              disabled={state.isConfiguring}
-              onClick={() => void controller.removeApiKey()}
-              type="button"
-            >
-              {strings.ai.removeKey}
-            </button>
-          ) : null}
-          <button
-            className="ml-auto text-xs text-[var(--lin-text-dim)] underline decoration-[var(--lin-border)] underline-offset-4 hover:text-[var(--lin-text)]"
-            onClick={() => setGuideOpen((open) => !open)}
-            type="button"
-          >
-            {guideOpen ? strings.ai.hideSetup : strings.ai.showSetup}
-          </button>
-        </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                className="rounded-md bg-[var(--lin-accent)] px-3 py-2 text-xs font-medium text-[var(--lin-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!available || !apiKey.trim() || state.isConfiguring}
+                onClick={async () => {
+                  const saved = await controller.saveApiKey(apiKey);
+                  if (saved) setApiKey("");
+                }}
+                type="button"
+              >
+                {state.isConfiguring ? strings.ai.testing : strings.ai.saveAndTest}
+              </button>
+              <button
+                className="text-xs text-[var(--lin-text-dim)] underline decoration-[var(--lin-border)] underline-offset-4 hover:text-[var(--lin-text)]"
+                onClick={() => setGuideOpen((open) => !open)}
+                type="button"
+              >
+                {guideOpen ? strings.ai.hideSetup : strings.ai.showSetup}
+              </button>
+              {configured ? (
+                <button
+                  className="ml-auto text-xs text-[var(--lin-danger)] hover:underline"
+                  disabled={state.isConfiguring}
+                  onClick={() => void controller.removeApiKey()}
+                  type="button"
+                >
+                  {strings.ai.removeKey}
+                </button>
+              ) : null}
+            </div>
 
-        {state.error ? (
-          <p className="text-xs text-[var(--lin-danger)]">
-            {aiErrorText(strings, state.error.code)}
-          </p>
-        ) : null}
+            {state.error ? (
+              <p className="text-xs text-[var(--lin-danger)]">
+                {aiErrorText(strings, state.error.code)}
+              </p>
+            ) : null}
 
-        {guideOpen ? (
-          <div className="rounded-lg border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-3 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
+            {guideOpen ? (
+              <div className="border-l-2 border-[var(--lin-border)] pl-3">
                 <h3 className="text-sm font-medium text-[var(--lin-text)]">
                   {strings.ai.setupTitle}
                 </h3>
                 <p className="mt-1 text-xs leading-5 text-[var(--lin-text-dim)]">
                   {strings.ai.setupGuide}
                 </p>
-              </div>
-              <button
-                className="shrink-0 rounded-md border border-[var(--lin-border)] px-2.5 py-1.5 text-xs text-[var(--lin-text-dim)] hover:border-[var(--lin-text-dim)] hover:text-[var(--lin-text)]"
-                onClick={() => void copySetupLink()}
-                type="button"
-              >
-                {copied ? strings.ai.copied : strings.ai.copyLink}
-              </button>
-            </div>
-            <ol className="mt-3 grid gap-2">
-              {strings.ai.setupSteps.map((step, index) => (
-                <li
-                  className="grid grid-cols-[20px_minmax(0,1fr)] gap-2 text-xs leading-5 text-[var(--lin-text-dim)]"
-                  key={step}
+                <a
+                  className="mt-1 inline-block break-all text-xs text-[var(--lin-text)] underline decoration-[var(--lin-text-dim)] underline-offset-4 hover:text-[var(--lin-accent)]"
+                  href={AI_STUDIO_URL}
+                  onClick={(event) => void openAiStudio(event)}
+                  rel="noreferrer"
+                  target="_blank"
                 >
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--lin-bg)] text-[10px] font-medium text-[var(--lin-text)]">
-                    {index + 1}
-                  </span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-3 border-t border-[var(--lin-border)] pt-2 text-[11px] leading-4 text-[var(--lin-text-mute)]">
-              {strings.ai.setupNote}
-            </p>
-          </div>
-        ) : null}
+                  {AI_STUDIO_URL}
+                </a>
+                <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-xs leading-5 text-[var(--lin-text-dim)]">
+                  {strings.ai.setupSteps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                <p className="mt-3 border-t border-[var(--lin-border)] pt-2 text-[11px] leading-4 text-[var(--lin-text-mute)]">
+                  {strings.ai.setupNote}
+                </p>
+              </div>
+            ) : null}
+          </>
+        )}
       </section>
 
       {configured ? (

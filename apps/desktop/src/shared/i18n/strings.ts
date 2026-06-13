@@ -29,7 +29,7 @@ export interface Strings {
     hide: string;
     quit: string;
   };
-  placeholder: string;
+  placeholders: readonly string[];
   preview: {
     saving: string;
     needsTime: string;
@@ -103,8 +103,14 @@ export interface Strings {
     fallbackHint: string;
     unavailable: string;
     providerLabel: string;
+    providerHint: string;
+    recommended: string;
+    comingLater: string;
     configured: string;
     notConfigured: string;
+    manageConnection: string;
+    hideConnection: string;
+    connectionStored: string;
     apiKeyLabel: string;
     apiKeyPlaceholder: string;
     keyStored: string;
@@ -121,8 +127,6 @@ export interface Strings {
     setupNote: string;
     showSetup: string;
     hideSetup: string;
-    copyLink: string;
-    copied: string;
     privacy: string;
     understanding: string;
     assisted: string;
@@ -177,7 +181,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       hide: "Hide",
       quit: "Quit",
     },
-    placeholder: "tomorrow 7am tutoring with Kevin",
+    placeholders: [
+      "in 20m check the oven",
+      "tomorrow 9am call the dentist",
+      "in 2 hours pick up the laundry",
+      "in 3 days at 10am pay the electricity bill",
+    ],
     preview: {
       saving: "Saving...",
       needsTime: 'Needs a time - try "in 30m" or "tomorrow 7am"',
@@ -264,8 +273,14 @@ const STRINGS: Record<LanguageId, Strings> = {
       fallbackHint: "Normal reminders stay instant and offline. Gemini is contacted only as a fallback.",
       unavailable: "Available only in the installed desktop app.",
       providerLabel: "Provider",
+      providerHint: "Gemini is recommended for its generous free tier. OpenAI and Anthropic support are planned.",
+      recommended: "recommended",
+      comingLater: "coming later",
       configured: "Connected",
       notConfigured: "Not connected",
+      manageConnection: "Manage connection",
+      hideConnection: "Hide connection",
+      connectionStored: "The API key is stored securely by your operating system.",
       apiKeyLabel: "Gemini API key",
       apiKeyPlaceholder: "Paste a Google AI Studio API key",
       keyStored: "Key stored securely by the operating system",
@@ -276,7 +291,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       refreshModels: "Refresh models",
       fast: "fast",
       fastHint: "Flash or Fast models are recommended for a quicker capture experience.",
-      setupGuide: "Create an API key in Google AI Studio, then paste it below. New AI Studio keys are automatically created as restricted authorization keys.",
+      setupGuide: "Visit this page to create a Gemini API key, then paste it below:",
       setupTitle: "How to get a free Gemini API key",
       setupSteps: [
         "Open Google AI Studio and sign in with your Google account.",
@@ -286,8 +301,6 @@ const STRINGS: Record<LanguageId, Strings> = {
       setupNote: "Your key is stored by the operating system, not in Linodea's reminder database. Google may use free-tier requests to improve its products, so avoid sensitive reminder text.",
       showSetup: "Show setup guide",
       hideSetup: "Hide setup guide",
-      copyLink: "Copy setup link",
-      copied: "Copied",
       privacy: "Only a failed reminder phrase, current time, timezone, and parser issue codes are sent to Gemini. Reminder history stays local.",
       understanding: "Understanding with Gemini...",
       assisted: "AI assisted",
@@ -345,7 +358,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       hide: "Sembunyikan",
       quit: "Keluar",
     },
-    placeholder: "besok jam 7 pagi les privat Kevin",
+    placeholders: [
+      "20 menit lagi cek oven",
+      "besok jam 9 telepon dokter gigi",
+      "2 jam lagi ambil cucian",
+      "lusa jam 10 bayar tagihan listrik",
+    ],
     preview: {
       saving: "Menyimpan...",
       needsTime: 'Butuh waktu - coba "30 menit lagi" atau "besok jam 7 pagi"',
@@ -432,8 +450,14 @@ const STRINGS: Record<LanguageId, Strings> = {
       fallbackHint: "Pengingat biasa tetap instan dan offline. Gemini hanya dihubungi sebagai cadangan.",
       unavailable: "Hanya tersedia di aplikasi desktop yang terpasang.",
       providerLabel: "Penyedia",
+      providerHint: "Gemini disarankan karena tingkat gratisnya cukup besar. Dukungan OpenAI dan Anthropic direncanakan.",
+      recommended: "disarankan",
+      comingLater: "segera hadir",
       configured: "Terhubung",
       notConfigured: "Belum terhubung",
+      manageConnection: "Kelola koneksi",
+      hideConnection: "Sembunyikan koneksi",
+      connectionStored: "Kunci API disimpan aman oleh sistem operasi.",
       apiKeyLabel: "Kunci API Gemini",
       apiKeyPlaceholder: "Tempel kunci API Google AI Studio",
       keyStored: "Kunci disimpan aman oleh sistem operasi",
@@ -444,7 +468,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       refreshModels: "Segarkan model",
       fast: "cepat",
       fastHint: "Model Flash atau Fast disarankan agar penangkapan pengingat lebih cepat.",
-      setupGuide: "Buat kunci API di Google AI Studio, lalu tempel di bawah. Kunci baru dari AI Studio otomatis dibuat sebagai kunci otorisasi terbatas.",
+      setupGuide: "Kunjungi halaman ini untuk membuat kunci API Gemini, lalu tempel di bawah:",
       setupTitle: "Cara mendapatkan kunci API Gemini gratis",
       setupSteps: [
         "Buka Google AI Studio lalu masuk dengan akun Google.",
@@ -454,8 +478,6 @@ const STRINGS: Record<LanguageId, Strings> = {
       setupNote: "Kunci disimpan oleh sistem operasi, bukan di basis data pengingat Linodea. Google dapat memakai permintaan tingkat gratis untuk meningkatkan produknya, jadi hindari teks pengingat sensitif.",
       showSetup: "Tampilkan panduan setup",
       hideSetup: "Sembunyikan panduan setup",
-      copyLink: "Salin tautan setup",
-      copied: "Tersalin",
       privacy: "Hanya frasa pengingat yang gagal, waktu saat ini, zona waktu, dan kode masalah parser yang dikirim ke Gemini. Riwayat tetap lokal.",
       understanding: "Memahami dengan Gemini...",
       assisted: "Dibantu AI",

@@ -26,13 +26,13 @@ export const LANGUAGES: LanguageDefinition[] = [
     id: "en",
     name: "English",
     description: "Interface in English. Parser breaks ties toward English.",
-    sample: "tomorrow 7am tutoring with Kevin",
+    sample: "tomorrow 9am call the dentist",
   },
   {
     id: "id",
     name: "Indonesian",
     description: "Antarmuka berbahasa Indonesia. Parser memilih kata Indonesia saat ragu.",
-    sample: "besok jam 7 pagi les privat Kevin",
+    sample: "besok jam 9 telepon dokter gigi",
   },
 ];
 
