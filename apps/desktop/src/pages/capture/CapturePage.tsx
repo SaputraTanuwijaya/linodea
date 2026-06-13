@@ -34,9 +34,15 @@ import type {
   RefObject,
   SyntheticEvent,
 } from "react";
-import type { ReminderNode } from "@linodea/types";
+import type { ReminderNode, ReminderParseResult } from "@linodea/types";
 
 import { PreviewLine } from "@/features/autocorrect-display";
+import {
+  aiErrorText,
+  shouldAttemptAiFallback,
+  type AiAssistController,
+  type AiCommandError,
+} from "@/features/ai-assist";
 import type { LanguageId } from "@/features/language";
 import {
   HighlightedInput,
@@ -58,9 +64,13 @@ import type { Strings } from "@/shared/i18n";
 import { formatDateTime, getDeviceId, isTauriRuntime, playUiSound } from "@/shared/lib";
 
 const CAPTURE_DEFAULT_HEIGHT = 130;
-const CAPTURE_WITH_SLASH_HEIGHT = 240;
+const CAPTURE_MENU_BASE_HEIGHT = 150;
+const SLASH_COMMAND_ROW_HEIGHT = 58;
+const ANCHOR_PICKER_ROW_HEIGHT = 40;
+const MAX_VISIBLE_ANCHORS = 5;
 
 export function CapturePage({
+  aiAssist,
   inputRef,
   language,
   onMenuButtonClick,
@@ -68,6 +78,7 @@ export function CapturePage({
   shouldHideAfterSave,
   strings,
 }: {
+  aiAssist: AiAssistController;
   /** Forwarded so App.tsx can refocus the input on window focus events. */
   inputRef: RefObject<HTMLInputElement | null>;
   language: LanguageId;
@@ -81,6 +92,14 @@ export function CapturePage({
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAiResolving, setIsAiResolving] = useState(false);
+  const [aiPreview, setAiPreview] = useState<{
+    sourceInput: string;
+    parseResult: ReminderParseResult;
+  } | null>(null);
+  const [aiMessage, setAiMessage] = useState<string | null>(null);
+  const aiRequestId = useRef(0);
+  const isLeavingCapture = useRef(false);
 
   // `/link` two-phase state. `anchorPicking` = phase 2 (choosing the anchor);
   // `linkAnchor` = the bound anchor (phase 3, typing the message).
@@ -108,6 +127,9 @@ export function CapturePage({
     [input, language, linkAnchor, anchorPicking],
   );
 
+  const activeParseResult =
+    aiPreview?.sourceInput === input ? aiPreview.parseResult : parsedReminder;
+
   // Live resolution of the linked reminder's time, relative to the anchor.
   const linkPreview = useMemo(() => {
     if (!linkAnchor || !input.trim()) return undefined;
@@ -124,26 +146,57 @@ export function CapturePage({
 
   const canSave = linkAnchor
     ? Boolean(input.trim())
-    : Boolean(parsedReminder?.draft.scheduledAt && input.trim());
+    : Boolean(activeParseResult?.draft.scheduledAt && input.trim());
+
+  const canUseAiFallback = Boolean(
+    !linkAnchor &&
+      !anchorPicking &&
+      input.trim() &&
+      !aiPreview &&
+      shouldAttemptAiFallback(input, parsedReminder) &&
+      aiAssist.state.config.enabled &&
+      aiAssist.state.status.available &&
+      aiAssist.state.status.configured &&
+      aiAssist.state.config.model,
+  );
 
   // Grow the popup while any dropdown is open so it isn't clipped; restore on
   // close. Capture mode only — list/settings own their own height.
   const menuOpen = slash.isOpen || anchorPicking;
+  const expandedCaptureHeight = slash.isOpen
+    ? CAPTURE_MENU_BASE_HEIGHT +
+      38 +
+      slash.suggestions.length * SLASH_COMMAND_ROW_HEIGHT
+    : CAPTURE_MENU_BASE_HEIGHT +
+      42 +
+      Math.max(1, Math.min(filteredAnchors.length, MAX_VISIBLE_ANCHORS)) *
+        ANCHOR_PICKER_ROW_HEIGHT;
   useEffect(() => {
-    if (!isTauriRuntime() || !shouldHideAfterSave) return;
+    if (
+      !isTauriRuntime() ||
+      !shouldHideAfterSave ||
+      isLeavingCapture.current
+    ) {
+      return;
+    }
     void invoke("set_popup_height", {
-      height: menuOpen ? CAPTURE_WITH_SLASH_HEIGHT : CAPTURE_DEFAULT_HEIGHT,
+      height: menuOpen ? expandedCaptureHeight : CAPTURE_DEFAULT_HEIGHT,
     }).catch(() => undefined);
-  }, [menuOpen, shouldHideAfterSave]);
+  }, [expandedCaptureHeight, menuOpen, shouldHideAfterSave]);
 
   function syncCaret(el: HTMLInputElement) {
     setCaret(el.selectionStart ?? el.value.length);
   }
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
-    setInput(event.target.value);
+    const next = event.target.value;
+    setInput(next);
     syncCaret(event.currentTarget);
     if (anchorPicking) setAnchorIndex(0);
+    aiRequestId.current += 1;
+    setAiPreview(null);
+    setAiMessage(null);
+    setIsAiResolving(false);
   }
 
   function handleSelect(event: SyntheticEvent<HTMLInputElement>) {
@@ -166,6 +219,18 @@ export function CapturePage({
   function chooseCommand(suggestion: SlashCommandSuggestion) {
     if (suggestion.command.name === "link") {
       void enterAnchorMode();
+      return;
+    }
+    if (suggestion.command.name === "ai") {
+      if (isTauriRuntime()) {
+        // Settings now owns the native window size. Do not clear the slash
+        // token first: that would close the menu and queue a stale 130px
+        // capture resize which can race the 660px settings resize.
+        isLeavingCapture.current = true;
+        void invoke("enter_ai_settings_mode").catch(() => {
+          isLeavingCapture.current = false;
+        });
+      }
       return;
     }
     applySlash(slash.applyCommand(suggestion));
@@ -265,6 +330,14 @@ export function CapturePage({
 
     if (event.key !== "Escape") return;
     event.preventDefault();
+    if (isAiResolving || aiPreview || aiMessage) {
+      aiRequestId.current += 1;
+      setIsAiResolving(false);
+      setAiPreview(null);
+      setAiMessage(null);
+      focusInput(ref.current);
+      return;
+    }
     // Phase 3: Esc drops the link first; otherwise dismiss the window.
     if (linkAnchor) {
       cancelLink();
@@ -274,8 +347,67 @@ export function CapturePage({
     void hideMainWindow();
   }
 
+  async function resolveWithAi() {
+    if (!canUseAiFallback || isAiResolving) return;
+
+    const sourceInput = input;
+    const requestedAt = new Date();
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const requestId = aiRequestId.current + 1;
+    aiRequestId.current = requestId;
+    setIsAiResolving(true);
+    setAiMessage(null);
+    aiAssist.clearError();
+
+    try {
+      const result = await aiAssist.normalize({
+        input: sourceInput,
+        now: requestedAt.toISOString(),
+        timezone,
+        language,
+        parserIssueCodes: parsedReminder?.issues.map((issue) => issue.code) ?? [],
+      });
+      if (requestId !== aiRequestId.current || sourceInput !== input) return;
+
+      if (result.status !== "normalized" || !result.normalizedInput) {
+        setAiMessage(
+          result.clarificationQuestion ?? result.reason ?? strings.ai.unsupported,
+        );
+        playUiSound("captureError");
+        return;
+      }
+
+      const normalized = parseReminder(result.normalizedInput, {
+        now: requestedAt,
+        timezone,
+        preferredLanguage: language,
+      });
+      if (!normalized.draft.scheduledAt) {
+        setAiMessage(strings.ai.unsupported);
+        playUiSound("captureError");
+        return;
+      }
+
+      setAiPreview({ sourceInput, parseResult: normalized });
+    } catch (error) {
+      if (requestId !== aiRequestId.current) return;
+      setAiMessage(aiErrorText(strings, errorCode(error)));
+      playUiSound("captureError");
+    } finally {
+      if (requestId === aiRequestId.current) {
+        setIsAiResolving(false);
+        focusInput(ref.current);
+      }
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (canUseAiFallback) {
+      await resolveWithAi();
+      return;
+    }
 
     if (!canSave) {
       if (input.trim()) playUiSound("captureError");
@@ -309,23 +441,25 @@ export function CapturePage({
         return;
       }
 
-      if (!parsedReminder?.draft.scheduledAt) return;
-      const reminder = createReminderNode(parsedReminder, getDeviceId());
+      if (!activeParseResult?.draft.scheduledAt) return;
+      const reminder = createReminderNode(activeParseResult, getDeviceId(), input);
       await createReminderNodeCommand(reminder);
 
       // `/countdown` reminders get an on-screen countdown timer. Display-only:
       // the scheduler still fires the alert at the exact instant.
-      if (parsedReminder.countdown && parsedReminder.draft.scheduledAt) {
+      if (activeParseResult.countdown && activeParseResult.draft.scheduledAt) {
         void invoke("show_timer", {
           payload: {
             title: reminder.title,
-            targetMs: Date.parse(parsedReminder.draft.scheduledAt),
+            targetMs: Date.parse(activeParseResult.draft.scheduledAt),
           },
         }).catch(() => undefined);
       }
 
       setInput("");
       setCaret(0);
+      setAiPreview(null);
+      setAiMessage(null);
       // onSaved triggers the scheduler to fire anything immediately due and
       // arm a precise timer for this new reminder.
       onSaved();
@@ -395,17 +529,30 @@ export function CapturePage({
               strings.link.hint
             )
           ) : (
-            <PreviewLine
-              isSaving={isSaving}
-              parseResult={parsedReminder}
-              strings={strings}
-            />
+            isAiResolving ? (
+              strings.ai.understanding
+            ) : aiMessage ? (
+              <span className="text-[var(--lin-danger)]">{aiMessage}</span>
+            ) : aiPreview?.sourceInput === input ? (
+              <>
+                <span className="text-[var(--lin-text)]">
+                  {formatDateTime(aiPreview.parseResult.draft.scheduledAt!)}
+                </span>{" "}
+                · {strings.ai.assisted} · {strings.ai.confirm}
+              </>
+            ) : (
+              <PreviewLine
+                isSaving={isSaving}
+                parseResult={parsedReminder}
+                strings={strings}
+              />
+            )
           )}
         </p>
 
         {anchorPicking ? (
           <div
-            className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
+            className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[242px] overflow-y-auto rounded-lg border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
             role="listbox"
           >
             <div className="px-3 py-1.5 text-xs text-[var(--lin-text-mute)]">
@@ -444,6 +591,7 @@ export function CapturePage({
           <SlashCommandMenu
             onPick={chooseCommand}
             selectedIndex={slash.selectedIndex}
+            strings={strings}
             suggestions={slash.suggestions}
           />
         ) : null}
@@ -472,4 +620,15 @@ async function hideMainWindow(): Promise<void> {
   } catch {
     // Silent.
   }
+}
+
+function errorCode(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as AiCommandError).code === "string"
+  ) {
+    return (error as AiCommandError).code;
+  }
+  return "provider_error";
 }

@@ -1,3 +1,4 @@
+mod ai;
 mod data;
 mod desktop;
 mod shortcut;
@@ -12,6 +13,44 @@ use tauri::{LogicalSize, Manager};
 
 struct AppState {
     reminders: Mutex<ReminderStore>,
+    ai: ai::AiService,
+}
+
+#[tauri::command]
+fn get_ai_assist_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<ai::AiStatus, ai::AiCommandError> {
+    state.ai.status()
+}
+
+#[tauri::command]
+async fn save_and_test_ai_api_key(
+    state: tauri::State<'_, AppState>,
+    api_key: String,
+) -> Result<ai::SaveKeyResult, ai::AiCommandError> {
+    state.ai.save_and_test_key(api_key).await
+}
+
+#[tauri::command]
+fn delete_ai_api_key(
+    state: tauri::State<'_, AppState>,
+) -> Result<ai::AiStatus, ai::AiCommandError> {
+    state.ai.delete_key()
+}
+
+#[tauri::command]
+async fn list_ai_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ai::AiModel>, ai::AiCommandError> {
+    state.ai.list_models().await
+}
+
+#[tauri::command]
+async fn normalize_reminder_with_ai(
+    state: tauri::State<'_, AppState>,
+    request: ai::AiNormalizeRequest,
+) -> Result<ai::AiNormalizationResult, ai::AiCommandError> {
+    state.ai.normalize(request).await
 }
 
 #[tauri::command]
@@ -186,6 +225,11 @@ fn enter_settings_mode(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn enter_ai_settings_mode(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::show_ai_settings_mode(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_popup_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -233,6 +277,7 @@ pub fn run() {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(AppState {
                 reminders: Mutex::new(store),
+                ai: ai::AiService::new(),
             });
             desktop::setup_desktop_integration(app)?;
             shortcut::setup_global_shortcut(app)?;
@@ -252,12 +297,18 @@ pub fn run() {
             advance_reminder_recurrence,
             get_local_database_path,
             get_local_schema_version,
+            get_ai_assist_status,
+            save_and_test_ai_api_key,
+            delete_ai_api_key,
+            list_ai_models,
+            normalize_reminder_with_ai,
             show_main_window,
             hide_main_window,
             enter_capture_mode,
             enter_list_mode,
             enter_chain_mode,
             enter_settings_mode,
+            enter_ai_settings_mode,
             set_popup_height,
             show_alert,
             dismiss_alert,

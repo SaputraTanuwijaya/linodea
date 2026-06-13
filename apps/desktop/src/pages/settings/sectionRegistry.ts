@@ -9,6 +9,7 @@
  * need to change.
  */
 
+import { aiAssistSettingsSection } from "@/features/ai-assist";
 import { themeSettingsSection } from "@/features/theme";
 import { languageSettingsSection } from "@/features/language";
 import { prealertsSettingsSection } from "@/features/prealerts";
@@ -20,4 +21,5 @@ export const SETTINGS_SECTIONS: SettingsSectionDescriptor[] = [
   prealertsSettingsSection,
   languageSettingsSection,
   startupSettingsSection,
+  aiAssistSettingsSection,
 ].sort((a, b) => a.order - b.order);

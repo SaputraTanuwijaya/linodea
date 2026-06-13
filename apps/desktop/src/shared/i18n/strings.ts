@@ -70,6 +70,7 @@ export interface Strings {
     notifications: { title: string; hint: (max: number) => string };
     language: { title: string; hint: string };
     startup: { title: string; hint: string };
+    ai: { title: string; hint: string };
   };
   themes: {
     dark: { name: string; description: string };
@@ -97,11 +98,53 @@ export interface Strings {
     toggleHint: string;
     unavailable: string;
   };
+  ai: {
+    fallbackLabel: string;
+    fallbackHint: string;
+    unavailable: string;
+    providerLabel: string;
+    configured: string;
+    notConfigured: string;
+    apiKeyLabel: string;
+    apiKeyPlaceholder: string;
+    keyStored: string;
+    saveAndTest: string;
+    testing: string;
+    removeKey: string;
+    modelLabel: string;
+    refreshModels: string;
+    fast: string;
+    fastHint: string;
+    setupGuide: string;
+    setupTitle: string;
+    setupSteps: readonly [string, string, string];
+    setupNote: string;
+    showSetup: string;
+    hideSetup: string;
+    copyLink: string;
+    copied: string;
+    privacy: string;
+    understanding: string;
+    assisted: string;
+    confirm: string;
+    unsupported: string;
+    errors: {
+      invalidKey: string;
+      quota: string;
+      timeout: string;
+      network: string;
+      model: string;
+      generic: string;
+    };
+  };
   /** Slash-command autocomplete: per-command label + description shown in the dropdown. */
   slash: {
+    menuTitle: string;
+    menuHint: string;
     countdown: { label: string; description: string };
     recur: { label: string; description: string };
     link: { label: string; description: string };
+    ai: { label: string; description: string };
   };
   /** /link anchor picker (phase 2 of the dropdown) + the bound-anchor chip. */
   link: {
@@ -188,6 +231,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Startup",
         hint: "Launch Linodea when you sign in so reminders keep firing without opening it manually.",
       },
+      ai: {
+        title: "AI Assist",
+        hint: "Optional Gemini fallback for unusual time phrases the local parser cannot resolve.",
+      },
     },
     themes: {
       dark: { name: "Dark", description: "Default. Easy on the eyes for night capture." },
@@ -212,7 +259,52 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleHint: "Linodea starts hidden in the tray and waits for the global shortcut.",
       unavailable: "Available only in the desktop app.",
     },
+    ai: {
+      fallbackLabel: "Use AI when local parsing fails",
+      fallbackHint: "Normal reminders stay instant and offline. Gemini is contacted only as a fallback.",
+      unavailable: "Available only in the installed desktop app.",
+      providerLabel: "Provider",
+      configured: "Connected",
+      notConfigured: "Not connected",
+      apiKeyLabel: "Gemini API key",
+      apiKeyPlaceholder: "Paste a Google AI Studio API key",
+      keyStored: "Key stored securely by the operating system",
+      saveAndTest: "Save & test",
+      testing: "Testing...",
+      removeKey: "Remove key",
+      modelLabel: "Model",
+      refreshModels: "Refresh models",
+      fast: "fast",
+      fastHint: "Flash or Fast models are recommended for a quicker capture experience.",
+      setupGuide: "Create an API key in Google AI Studio, then paste it below. New AI Studio keys are automatically created as restricted authorization keys.",
+      setupTitle: "How to get a free Gemini API key",
+      setupSteps: [
+        "Open Google AI Studio and sign in with your Google account.",
+        "Choose Create API key. The Gemini free tier is enough to try AI Assist.",
+        "Copy the key, return to Linodea, then paste it into the API key field.",
+      ],
+      setupNote: "Your key is stored by the operating system, not in Linodea's reminder database. Google may use free-tier requests to improve its products, so avoid sensitive reminder text.",
+      showSetup: "Show setup guide",
+      hideSetup: "Hide setup guide",
+      copyLink: "Copy setup link",
+      copied: "Copied",
+      privacy: "Only a failed reminder phrase, current time, timezone, and parser issue codes are sent to Gemini. Reminder history stays local.",
+      understanding: "Understanding with Gemini...",
+      assisted: "AI assisted",
+      confirm: "Press Enter again to save",
+      unsupported: "Gemini could not safely resolve that phrase.",
+      errors: {
+        invalidKey: "Gemini rejected this API key.",
+        quota: "The Gemini quota or rate limit was reached.",
+        timeout: "Gemini took too long to respond.",
+        network: "Could not reach Gemini.",
+        model: "Choose another Gemini model and test again.",
+        generic: "AI Assist could not complete the request.",
+      },
+    },
     slash: {
+      menuTitle: "Commands",
+      menuHint: "Arrow keys to navigate · Enter to select",
       countdown: {
         label: "/countdown",
         description: "Keep exact-second timing and show an on-screen countdown.",
@@ -224,6 +316,10 @@ const STRINGS: Record<LanguageId, Strings> = {
       link: {
         label: "/link",
         description: "Attach to a reminder — time counts from it (e.g. 30m before, 1 jam after).",
+      },
+      ai: {
+        label: "/ai",
+        description: "Open AI Assist setup, API key, and model selection.",
       },
     },
     link: {
@@ -303,6 +399,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Saat dimulai",
         hint: "Jalankan Linodea otomatis saat masuk agar pengingat tetap aktif tanpa perlu dibuka manual.",
       },
+      ai: {
+        title: "Bantuan AI",
+        hint: "Gemini opsional untuk frasa waktu tidak biasa yang gagal dipahami parser lokal.",
+      },
     },
     themes: {
       dark: { name: "Gelap", description: "Bawaan. Nyaman untuk malam hari." },
@@ -327,7 +427,52 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleHint: "Linodea berjalan tersembunyi di tray dan menunggu pintasan global.",
       unavailable: "Hanya tersedia di aplikasi desktop.",
     },
+    ai: {
+      fallbackLabel: "Gunakan AI saat parser lokal gagal",
+      fallbackHint: "Pengingat biasa tetap instan dan offline. Gemini hanya dihubungi sebagai cadangan.",
+      unavailable: "Hanya tersedia di aplikasi desktop yang terpasang.",
+      providerLabel: "Penyedia",
+      configured: "Terhubung",
+      notConfigured: "Belum terhubung",
+      apiKeyLabel: "Kunci API Gemini",
+      apiKeyPlaceholder: "Tempel kunci API Google AI Studio",
+      keyStored: "Kunci disimpan aman oleh sistem operasi",
+      saveAndTest: "Simpan & tes",
+      testing: "Menguji...",
+      removeKey: "Hapus kunci",
+      modelLabel: "Model",
+      refreshModels: "Segarkan model",
+      fast: "cepat",
+      fastHint: "Model Flash atau Fast disarankan agar penangkapan pengingat lebih cepat.",
+      setupGuide: "Buat kunci API di Google AI Studio, lalu tempel di bawah. Kunci baru dari AI Studio otomatis dibuat sebagai kunci otorisasi terbatas.",
+      setupTitle: "Cara mendapatkan kunci API Gemini gratis",
+      setupSteps: [
+        "Buka Google AI Studio lalu masuk dengan akun Google.",
+        "Pilih Create API key. Tingkat gratis Gemini cukup untuk mencoba Bantuan AI.",
+        "Salin kuncinya, kembali ke Linodea, lalu tempel ke kolom kunci API.",
+      ],
+      setupNote: "Kunci disimpan oleh sistem operasi, bukan di basis data pengingat Linodea. Google dapat memakai permintaan tingkat gratis untuk meningkatkan produknya, jadi hindari teks pengingat sensitif.",
+      showSetup: "Tampilkan panduan setup",
+      hideSetup: "Sembunyikan panduan setup",
+      copyLink: "Salin tautan setup",
+      copied: "Tersalin",
+      privacy: "Hanya frasa pengingat yang gagal, waktu saat ini, zona waktu, dan kode masalah parser yang dikirim ke Gemini. Riwayat tetap lokal.",
+      understanding: "Memahami dengan Gemini...",
+      assisted: "Dibantu AI",
+      confirm: "Tekan Enter lagi untuk menyimpan",
+      unsupported: "Gemini tidak dapat menyelesaikan frasa itu dengan aman.",
+      errors: {
+        invalidKey: "Gemini menolak kunci API ini.",
+        quota: "Kuota atau batas permintaan Gemini tercapai.",
+        timeout: "Gemini terlalu lama merespons.",
+        network: "Tidak dapat menghubungi Gemini.",
+        model: "Pilih model Gemini lain lalu tes kembali.",
+        generic: "Bantuan AI tidak dapat menyelesaikan permintaan.",
+      },
+    },
     slash: {
+      menuTitle: "Perintah",
+      menuHint: "Tombol panah untuk navigasi · Enter untuk memilih",
       countdown: {
         label: "/countdown",
         description: "Pertahankan waktu detik tepat dan tampilkan hitung mundur di layar.",
@@ -339,6 +484,10 @@ const STRINGS: Record<LanguageId, Strings> = {
       link: {
         label: "/link",
         description: "Tautkan ke pengingat lain — waktunya dihitung dari situ (mis. 30m before, 1 jam after).",
+      },
+      ai: {
+        label: "/ai",
+        description: "Buka setup Bantuan AI, kunci API, dan pilihan model.",
       },
     },
     link: {

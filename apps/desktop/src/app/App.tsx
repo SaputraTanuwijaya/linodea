@@ -30,6 +30,7 @@ import {
   startReminderNotificationScheduler,
   type ReminderNotificationScheduler,
 } from "@/entities/reminder";
+import { useAiAssist } from "@/features/ai-assist";
 import { useLanguage } from "@/features/language";
 import { usePrealerts } from "@/features/prealerts";
 import { useAutostart } from "@/features/startup";
@@ -58,6 +59,7 @@ function App() {
   const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
 
   const [mode, setMode] = useState<Mode>("capture");
+  const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
 
@@ -65,6 +67,7 @@ function App() {
   const [language, setLanguage] = useLanguage();
   const [prealertConfig, setPrealertConfig] = usePrealerts();
   const [autostart, setAutostart] = useAutostart();
+  const aiAssist = useAiAssist();
 
   const strings = useMemo(() => stringsFor(language), [language]);
 
@@ -77,6 +80,7 @@ function App() {
       language: { value: language, set: setLanguage },
       prealerts: { value: prealertConfig, set: setPrealertConfig },
       autostart: { value: autostart, set: setAutostart },
+      aiAssist,
     }),
     [
       strings,
@@ -88,6 +92,7 @@ function App() {
       setPrealertConfig,
       autostart,
       setAutostart,
+      aiAssist,
     ],
   );
 
@@ -106,7 +111,9 @@ function App() {
 
     void listen<string>(MODE_EVENT, (event) => {
       if (!mounted) return;
-      setMode(parseMode(event.payload));
+      const parsed = parseMode(event.payload);
+      setMode(parsed.mode);
+      setSettingsFocus(parsed.settingsSection);
       setMenuAnchor(null);
     }).then((fn) => {
       if (mounted) {
@@ -224,27 +231,32 @@ function App() {
   return (
     <main className="flex h-screen w-screen items-start justify-center bg-transparent pt-3">
       <div className="relative w-[560px]" onContextMenu={handleContextMenu}>
-        <img
-          alt=""
-          className="pointer-events-none absolute -left-5 -top-7 z-10 h-20 w-20 rotate-[8deg] select-none object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
-          draggable={false}
-          src="/brand/logo.png"
-        />
+        {mode !== "settings" ? (
+          <>
+            <img
+              alt=""
+              className="pointer-events-none absolute -left-5 -top-7 z-10 h-20 w-20 rotate-[8deg] select-none object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
+              draggable={false}
+              src="/brand/logo.png"
+            />
 
-        <CapturePage
-          inputRef={inputRef}
-          language={language}
-          onMenuButtonClick={handleMenuButtonClick}
-          onSaved={() => {
-            setListRefreshKey((k) => k + 1);
-            // Arm a precise timer for the reminder just captured (e.g. an
-            // "in 1m" boiling-water reminder fires on the second, not on the
-            // next coarse backstop tick).
-            void schedulerRef.current?.sync();
-          }}
-          shouldHideAfterSave={mode === "capture"}
-          strings={strings}
-        />
+            <CapturePage
+              aiAssist={aiAssist}
+              inputRef={inputRef}
+              language={language}
+              onMenuButtonClick={handleMenuButtonClick}
+              onSaved={() => {
+                setListRefreshKey((k) => k + 1);
+                // Arm a precise timer for the reminder just captured (e.g. an
+                // "in 1m" boiling-water reminder fires on the second, not on the
+                // next coarse backstop tick).
+                void schedulerRef.current?.sync();
+              }}
+              shouldHideAfterSave={mode === "capture"}
+              strings={strings}
+            />
+          </>
+        ) : null}
 
         {mode === "list" ? (
           <ListPage
@@ -260,7 +272,7 @@ function App() {
         ) : null}
 
         {mode === "settings" ? (
-          <SettingsPage bundle={settingsBundle} />
+          <SettingsPage bundle={settingsBundle} focusSectionId={settingsFocus} />
         ) : null}
       </div>
 
@@ -277,11 +289,17 @@ function App() {
   );
 }
 
-function parseMode(payload: string): Mode {
-  if (payload === "list") return "list";
-  if (payload === "chain") return "chain";
-  if (payload === "settings") return "settings";
-  return "capture";
+function parseMode(payload: string): {
+  mode: Mode;
+  settingsSection: string | null;
+} {
+  if (payload === "list") return { mode: "list", settingsSection: null };
+  if (payload === "chain") return { mode: "chain", settingsSection: null };
+  if (payload.startsWith("settings")) {
+    const section = payload.split(":", 2)[1] ?? null;
+    return { mode: "settings", settingsSection: section };
+  }
+  return { mode: "capture", settingsSection: null };
 }
 
 export default App;

@@ -11,22 +11,25 @@ due-reminder queries. The capture surface is a frameless floating popup: pressin
 shows the parsed time inline, and Enter saves and dismisses. The popup now uses a
 linked-node Linodea mark; invalid non-empty captures stay open and play a short
 error cue. The popup auto-hides on focus loss. Tray icon and close-to-tray remain. The tray's Reminders view lists
-queued reminders with per-row done / snooze / edit / delete. Settings cover theme,
-language, configurable prealerts, and launch-on-startup. Reminders fire user-set
+queued reminders with per-row done / snooze / edit / delete. Settings use a category
+navigator for theme, language, configurable prealerts, launch-on-startup, and optional
+AI Assist. `/ai` opens Gemini setup; normal reminders remain local and instant, while
+enabled AI Assist only receives failed or suspicious reminder phrases as a fallback.
+Reminders fire user-set
 prealerts plus a due-time alert in a custom Linodea notification window (with Done /
 Snooze and a short ping), scheduled by a precise in-process timer. Relative reminders snap to the
 minute; add `/countdown` to keep exact-second timing for short countdowns.
 
 ## Architecture
 
-Linodea follows the **local-first software** model: the device is the source of truth, and the network is optional. Reminders are stored in a local SQLite database; nothing leaves the device.
+Linodea follows the **local-first software** model: the device is the source of truth, and the network is optional. Reminders are stored in a local SQLite database. Nothing leaves the device by default; users who explicitly enable BYO-key AI Assist send only the reminder phrase being resolved plus its time context to Gemini.
 
 The app uses a **native shell + web frontend** pattern via Tauri v2. A small Rust binary owns the OS surface — tray icon, global shortcut, notifications, autostart, the SQLite file — and a React/TypeScript UI renders inside a system WebView. The two halves talk through a typed command boundary.
 
 Why this stack:
 
 - **Offline-by-default** — no server to wait on, no account to create.
-- **Privacy** — data never leaves the device.
+- **Privacy by default** — reminder history stays local; the optional AI fallback is explicit and narrowly scoped.
 - **Fast cold start** — opening the popup is instant; no network round-trip.
 - **OS-native feel** — real global shortcut, real tray icon, real toast notifications.
 - **Small installer, one codebase** — Windows / macOS / Linux ship from the same source.
@@ -68,7 +71,7 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 - No cloud sync in the MVP.
 - No backend in the MVP.
 - No mobile app in the MVP.
-- No AI dependency.
+- No mandatory or bundled AI dependency.
 - No calendar replacement.
 - No kanban board.
 - No workspace or team productivity suite.

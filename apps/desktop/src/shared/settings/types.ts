@@ -16,6 +16,7 @@
 
 import type { ComponentType } from "react";
 
+import type { AiAssistController } from "@/features/ai-assist";
 import type { AutostartState } from "@/features/startup";
 import type { LanguageId } from "@/features/language";
 import type { PrealertConfig } from "@/features/prealerts";
@@ -46,6 +47,7 @@ export interface SettingsBundle {
   language: SettingsSlot<LanguageId>;
   prealerts: SettingsSlot<PrealertConfig>;
   autostart: SettingsSlot<AutostartState, boolean>;
+  aiAssist: AiAssistController;
 }
 
 /**

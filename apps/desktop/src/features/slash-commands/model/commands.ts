@@ -50,6 +50,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     kind: "action",
     strings: (s) => s.slash.link,
   },
+  {
+    name: "ai",
+    kind: "action",
+    strings: (s) => s.slash.ai,
+  },
 ];
 
 /** Lower-cased set of every command name + alias, for the input highlighter. */

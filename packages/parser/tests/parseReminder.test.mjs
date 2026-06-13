@@ -299,6 +299,20 @@ test("relative days parse", () => {
   assert.equal(result.draft.title, "submit report");
 });
 
+test("relative day plus clock time uses the target day's clock", () => {
+  const result = parseReminderWithNow("in 2 days at 9am submit report", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-24T02:00:00.000Z");
+  assert.equal(result.draft.title, "submit report");
+});
+
+test("Indonesian relative day plus clock time uses the target day's clock", () => {
+  const result = parseReminderWithNow("2 hari lagi jam 9 kirim laporan", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-24T02:00:00.000Z");
+  assert.equal(result.draft.title, "kirim laporan");
+});
+
 test("bare 24-hour time resolves to today when still ahead", () => {
   const result = parseReminderWithNow("19:00 do this", options);
 

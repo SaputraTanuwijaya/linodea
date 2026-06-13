@@ -32,6 +32,7 @@ const MODE_CAPTURE: &str = "capture";
 const MODE_LIST: &str = "list";
 const MODE_CHAIN: &str = "chain";
 const MODE_SETTINGS: &str = "settings";
+const MODE_AI_SETTINGS: &str = "settings:ai-assist";
 
 pub fn setup_desktop_integration(app: &mut App) -> tauri::Result<()> {
     hide_main_window_on_close(app.handle())?;
@@ -53,6 +54,10 @@ pub fn show_chain_mode(app: &AppHandle) -> tauri::Result<()> {
 
 pub fn show_settings_mode(app: &AppHandle) -> tauri::Result<()> {
     show_in_mode(app, SETTINGS_SIZE, MODE_SETTINGS)
+}
+
+pub fn show_ai_settings_mode(app: &AppHandle) -> tauri::Result<()> {
+    show_in_mode(app, SETTINGS_SIZE, MODE_AI_SETTINGS)
 }
 
 pub fn show_main_window(app: &AppHandle) -> tauri::Result<()> {

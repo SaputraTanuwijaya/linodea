@@ -407,6 +407,38 @@ function parseDateTime(
 
   const relative = findRelativeTime(input);
   if (relative) {
+    const clock = relative.days !== undefined ? findClockTime(input) : undefined;
+    if (clock && relative.days !== undefined) {
+      const baseDate = addDaysInTimezone(now, timezone, relative.days);
+      const connector = findRelativeClockConnector(
+        input,
+        relative.segment.end,
+        clock.segment.start,
+      );
+      return {
+        scheduledAt: localDateTimeToUtcIso(
+          {
+            year: baseDate.year,
+            month: baseDate.month,
+            day: baseDate.day,
+            hour: clock.parts.hour,
+            minute: clock.parts.minute,
+            second: 0,
+          },
+          timezone,
+        ),
+        segments: [
+          relative.segment,
+          ...(connector ? [connector] : []),
+          clock.segment,
+        ],
+        issues: clock.issue ? [clock.issue] : [],
+        hasScheduledAt: true,
+        hasDate: true,
+        hasTime: true,
+      };
+    }
+
     // Default: snap to the nearest minute (:00) so firing is clean and
     // predictable. `/countdown` keeps the exact instant for precise timers, and
     // sub-minute durations always keep it too (snapping 30s to :00 is nonsense).
@@ -555,9 +587,9 @@ const SE_PREFIX_UNITS = "detik|menit|jam|hari";
  * match, the earliest in the text wins (deterministic, matches reading order).
  */
 function findRelativeTime(input: string):
-  | { ms: number; segment: TextSegment }
+  | { ms: number; days?: number; segment: TextSegment }
   | undefined {
-  const candidates: Array<{ ms: number; segment: TextSegment }> = [];
+  const candidates: Array<{ ms: number; days?: number; segment: TextSegment }> = [];
 
   // Primary: digits or a spelled number word, then a unit.
   const main = new RegExp(
@@ -569,6 +601,7 @@ function findRelativeTime(input: string):
     if (!Number.isNaN(amount)) {
       candidates.push({
         ms: relativeUnitToMs(amount, main[2]),
+        days: isDayUnit(main[2]) ? amount : undefined,
         segment: { start: main.index, end: main.index + main[0].length },
       });
     }
@@ -582,6 +615,7 @@ function findRelativeTime(input: string):
   if (se?.index !== undefined) {
     candidates.push({
       ms: relativeUnitToMs(1, se[1]),
+      days: isDayUnit(se[1]) ? 1 : undefined,
       segment: { start: se.index, end: se.index + se[0].length },
     });
   }
@@ -594,6 +628,7 @@ function findRelativeTime(input: string):
   if (article?.index !== undefined) {
     candidates.push({
       ms: relativeUnitToMs(1, article[1]),
+      days: isDayUnit(article[1]) ? 1 : undefined,
       segment: { start: article.index, end: article.index + article[0].length },
     });
   }
@@ -601,6 +636,21 @@ function findRelativeTime(input: string):
   if (candidates.length === 0) return undefined;
   candidates.sort((a, b) => a.segment.start - b.segment.start);
   return candidates[0];
+}
+
+function isDayUnit(unit: string): boolean {
+  return ["d", "day", "days", "hari"].includes(unit.toLowerCase());
+}
+
+function findRelativeClockConnector(
+  input: string,
+  start: number,
+  end: number,
+): TextSegment | undefined {
+  if (end <= start) return undefined;
+  return /^\s*(?:at|pukul)\s*$/i.test(input.slice(start, end))
+    ? { start, end }
+    : undefined;
 }
 
 /** Weekday name → index (0 = Sunday). EN full + 3-letter; ID full. */

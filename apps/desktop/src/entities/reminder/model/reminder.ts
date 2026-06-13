@@ -16,6 +16,7 @@ import type { ReminderNode, ReminderParseResult } from "@linodea/types";
 export function createReminderNode(
   parseResult: ReminderParseResult,
   deviceId: string,
+  rawInputOverride?: string,
 ): ReminderNode {
   if (!parseResult.draft.scheduledAt) {
     throw new Error("Reminder scheduled time is required.");
@@ -26,7 +27,7 @@ export function createReminderNode(
   return {
     id: crypto.randomUUID(),
     title: parseResult.draft.title,
-    rawInput: parseResult.rawInput,
+    rawInput: rawInputOverride ?? parseResult.rawInput,
     scheduledAt: parseResult.draft.scheduledAt,
     timezone: parseResult.draft.timezone,
     type: parseResult.draft.type,
