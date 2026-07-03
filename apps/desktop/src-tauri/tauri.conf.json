@@ -55,6 +55,21 @@
         "skipTaskbar": true,
         "visible": false,
         "focus": false
+      },
+      {
+        "label": "confirm",
+        "title": "Linodea",
+        "width": 380,
+        "height": 200,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {

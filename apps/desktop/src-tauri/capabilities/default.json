@@ -1,13 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main, alert, and timer windows",
-  "windows": ["main", "alert", "timer"],
+  "description": "Capability for the main, alert, timer, and confirm windows",
+  "windows": ["main", "alert", "timer", "confirm"],
   "permissions": [
     "core:default",
     "notification:default",
     "autostart:default",
-    "dialog:default",
     "opener:default"
   ]
 }

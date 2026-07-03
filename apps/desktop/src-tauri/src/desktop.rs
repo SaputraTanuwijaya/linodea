@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::MenuBuilder,
@@ -5,16 +7,23 @@ use tauri::{
     App, AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewWindow, WindowEvent,
 };
 
+/// Set by `show_confirm` before the confirm window is shown; drained by the
+/// webview on mount. Covers the first-run race where the confirm window may not
+/// yet be listening when the very first `show_confirm` fires at startup (the
+/// autostart prompt) — without it the window would show empty.
+static PENDING_CONFIRM: Mutex<Option<String>> = Mutex::new(None);
+
 const MAIN_WINDOW_LABEL: &str = "main";
 const ALERT_WINDOW_LABEL: &str = "alert";
 const TIMER_WINDOW_LABEL: &str = "timer";
+const CONFIRM_WINDOW_LABEL: &str = "confirm";
 const NOTIFY_EVENT: &str = "linodea:notify";
 const TIMER_EVENT: &str = "linodea:timer";
-/// Asks the webview to confirm before quitting (reminders stop when quit). The
-/// JS side runs the localized dialog, then invokes `quit_app` if confirmed.
-const CONFIRM_QUIT_EVENT: &str = "linodea:confirm-quit";
+/// Carries the confirmation kind ("quit" | "autostart") to the confirm window.
+const CONFIRM_EVENT: &str = "linodea:confirm";
 const ALERT_SIZE: (f64, f64) = (360.0, 120.0);
 const TIMER_SIZE: (f64, f64) = (220.0, 120.0);
+const CONFIRM_SIZE: (f64, f64) = (380.0, 200.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
 const BOTTOM_RIGHT_MARGIN: f64 = 16.0;
 const BOTTOM_RIGHT_SLACK: f64 = 48.0;
@@ -122,6 +131,48 @@ pub fn hide_timer(app: &AppHandle) -> tauri::Result<()> {
     timer_window(app)?.hide()
 }
 
+/// Which decision the confirm window is asking about. The webview renders the
+/// themed, localized copy for the kind and emits `linodea:confirm-result`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmPayload {
+    /// "quit" | "autostart".
+    pub kind: String,
+}
+
+/// Show the themed confirmation window centered and focused. Unlike the alert,
+/// this one takes focus so Enter/Escape work and it reads as a real prompt.
+pub fn show_confirm(app: &AppHandle, payload: ConfirmPayload) -> tauri::Result<()> {
+    let window = confirm_window(app)?;
+    if let Ok(mut pending) = PENDING_CONFIRM.lock() {
+        *pending = Some(payload.kind.clone());
+    }
+    let _ = window.set_size(LogicalSize::new(CONFIRM_SIZE.0, CONFIRM_SIZE.1));
+    let _ = app.emit_to(CONFIRM_WINDOW_LABEL, CONFIRM_EVENT, payload);
+    let _ = window.center();
+    window.show()?;
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+    Ok(())
+}
+
+pub fn hide_confirm(app: &AppHandle) -> tauri::Result<()> {
+    confirm_window(app)?.hide()
+}
+
+/// Return and clear any confirmation kind stashed before the window was ready.
+pub fn take_pending_confirm() -> Option<String> {
+    PENDING_CONFIRM
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.take())
+}
+
+fn confirm_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    app.get_webview_window(CONFIRM_WINDOW_LABEL)
+        .ok_or(tauri::Error::WindowNotFound)
+}
+
 fn alert_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     app.get_webview_window(ALERT_WINDOW_LABEL)
         .ok_or(tauri::Error::WindowNotFound)
@@ -210,9 +261,14 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
                 let _ = hide_main_window(app);
             }
             TRAY_MENU_QUIT => {
-                // Route through the webview so the user gets the localized
-                // "reminders will stop" confirmation before actually exiting.
-                let _ = app.emit_to(MAIN_WINDOW_LABEL, CONFIRM_QUIT_EVENT, ());
+                // Show the themed confirm window (reminders stop when quit). The
+                // main window acts on the result via `linodea:confirm-result`.
+                let _ = show_confirm(
+                    app,
+                    ConfirmPayload {
+                        kind: "quit".into(),
+                    },
+                );
             }
             _ => {}
         })

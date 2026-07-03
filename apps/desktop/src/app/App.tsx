@@ -21,7 +21,6 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
@@ -50,7 +49,10 @@ import {
 } from "@/widgets/popup-menu";
 
 const MODE_EVENT = "linodea:mode";
-const CONFIRM_QUIT_EVENT = "linodea:confirm-quit";
+const CONFIRM_RESULT_EVENT = "linodea:confirm-result";
+// Bumped v1 -> v2: v1 was set by the earlier native-dialog build even when its
+// prompt failed to show, so existing installs would never see the new prompt.
+const AUTOSTART_PROMPTED_KEY = "linodea.autostart.promptedForBoot.v2";
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
 type Mode = "capture" | "list" | "chain" | "settings";
@@ -59,9 +61,6 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
-  // Holds the latest confirm-quit handler so the tray-event listener (subscribed
-  // once) always runs the current-language version.
-  const confirmQuitRef = useRef<() => void>(() => undefined);
 
   const [mode, setMode] = useState<Mode>("capture");
   const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
@@ -108,34 +107,18 @@ function App() {
     void enableReminderNotifications().catch(() => undefined);
   }, []);
 
-  // First run only: ask to enable launch-on-boot. Reliability depends on the app
-  // staying running, so this is recommended — but we ask rather than silently
-  // adding a startup entry (more trustworthy, and avoids antivirus heuristics).
-  // The marker is set before the dialog so it never re-prompts.
+  // First run only: prompt to enable launch-on-boot via the themed confirm
+  // window. Reliability depends on the app staying running, so it's recommended
+  // — but we ask rather than silently adding a startup entry (more trustworthy,
+  // avoids antivirus heuristics). The marker is set only once the user actually
+  // answers (in the confirm-result handler below), so a prompt that fails to
+  // show is retried next launch instead of being lost.
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    const PROMPTED_KEY = "linodea.autostart.promptedForBoot.v1";
-    let cancelled = false;
-    void (async () => {
-      try {
-        if (localStorage.getItem(PROMPTED_KEY)) return;
-        localStorage.setItem(PROMPTED_KEY, "1");
-        const enable = await ask(strings.autostartPrompt.body, {
-          title: strings.autostartPrompt.title,
-          kind: "info",
-          okLabel: strings.autostartPrompt.enable,
-          cancelLabel: strings.autostartPrompt.notNow,
-        });
-        if (!cancelled) await setAutostart(enable);
-      } catch {
-        // Plugin/dialog unavailable (e.g. browser fallback) — leave OS untouched.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Mount-once: first-run prompt in the app's default language.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (localStorage.getItem(AUTOSTART_PROMPTED_KEY)) return;
+    void invoke("show_confirm", { payload: { kind: "autostart" } }).catch(
+      () => undefined,
+    );
   }, []);
 
   useEffect(() => {
@@ -170,9 +153,21 @@ function App() {
     let mounted = true;
     let unlisten: UnlistenFn | undefined;
 
-    // Tray "Quit" emits this so the confirmation runs in the webview (localized,
-    // works even while the window is hidden in the tray).
-    void listen(CONFIRM_QUIT_EVENT, () => confirmQuitRef.current()).then((fn) => {
+    // The themed confirm window (quit / autostart) reports the user's choice
+    // here; the action lives in the main window where quit + autostart live.
+    void listen<{ kind: string; confirmed: boolean }>(
+      CONFIRM_RESULT_EVENT,
+      (event) => {
+        const { kind, confirmed } = event.payload;
+        if (kind === "quit") {
+          if (confirmed) void invoke("quit_app").catch(() => undefined);
+        } else if (kind === "autostart") {
+          // Mark answered only now, so a prompt that never showed retries later.
+          localStorage.setItem(AUTOSTART_PROMPTED_KEY, "1");
+          void setAutostart(confirmed);
+        }
+      },
+    ).then((fn) => {
       if (mounted) {
         unlisten = fn;
       } else {
@@ -254,27 +249,15 @@ function App() {
     void openMenuAt(rect.left, rect.bottom + 4);
   }
 
-  // Quitting stops all reminders (they only fire while the app runs), so gate
-  // every quit path behind a localized confirmation. Both the popup menu and the
-  // tray Quit item funnel here; only "Quit anyway" actually exits.
-  async function confirmAndQuit() {
-    if (!isTauriRuntime()) return;
+  // Quitting stops all reminders (they only fire while the app runs), so gate it
+  // behind the themed confirm window. The tray Quit item shows the same window
+  // from Rust; both resolve via the `linodea:confirm-result` listener above.
+  function requestQuit() {
     setMenuAnchor(null);
-    try {
-      const confirmed = await ask(strings.quitConfirm.body, {
-        title: strings.quitConfirm.title,
-        kind: "warning",
-        okLabel: strings.quitConfirm.confirm,
-        cancelLabel: strings.quitConfirm.cancel,
-      });
-      if (confirmed) await invoke("quit_app");
-    } catch {
-      // If the dialog can't render, honor the explicit quit intent rather than
-      // trapping the user with a dead menu item.
-      await invoke("quit_app").catch(() => undefined);
-    }
+    void invoke("show_confirm", { payload: { kind: "quit" } }).catch(
+      () => undefined,
+    );
   }
-  confirmQuitRef.current = confirmAndQuit;
 
   async function handleMenuAction(action: MenuAction) {
     setMenuAnchor(null);
@@ -297,7 +280,7 @@ function App() {
           await invoke("hide_main_window");
           break;
         case "quit":
-          await confirmAndQuit();
+          requestQuit();
           break;
       }
     } catch {

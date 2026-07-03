@@ -229,6 +229,11 @@ fn enter_ai_settings_mode(app: tauri::AppHandle) -> Result<(), String> {
     desktop::show_ai_settings_mode(&app).map_err(|error| error.to_string())
 }
 
+// Adjust the capture window's height in place (for the ••• menu and the
+// slash/anchor dropdowns) WITHOUT re-centering — re-centering shifts the capture
+// bar upward as it grows, which reads as the popup "jumping". Growing downward
+// from a fixed top keeps the bar pinned. Mode switches still recenter via
+// `show_in_mode`, so switching to chain/list/settings can still reposition.
 #[tauri::command]
 fn set_popup_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let window = app
@@ -237,7 +242,6 @@ fn set_popup_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     window
         .set_size(LogicalSize::new(620.0, height))
         .map_err(|error| error.to_string())?;
-    window.center().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -262,6 +266,21 @@ fn dismiss_timer(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_confirm(app: tauri::AppHandle, payload: desktop::ConfirmPayload) -> Result<(), String> {
+    desktop::show_confirm(&app, payload).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn dismiss_confirm(app: tauri::AppHandle) -> Result<(), String> {
+    desktop::hide_confirm(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn take_pending_confirm() -> Option<String> {
+    desktop::take_pending_confirm()
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -273,7 +292,6 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
@@ -316,6 +334,9 @@ pub fn run() {
             dismiss_alert,
             show_timer,
             dismiss_timer,
+            show_confirm,
+            dismiss_confirm,
+            take_pending_confirm,
             quit_app
         ])
         .run(tauri::generate_context!())

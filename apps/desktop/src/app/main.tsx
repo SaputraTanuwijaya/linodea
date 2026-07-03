@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import "./App.css";
 import App from "./App";
 import { AlertPage } from "@/pages/alert";
+import { ConfirmPage } from "@/pages/confirm";
 import { TimerPage } from "@/pages/timer";
 import { applyLanguage, getStoredLanguage } from "@/features/language";
 import { applyTheme, getStoredTheme } from "@/features/theme";
@@ -24,7 +25,9 @@ const Root =
     ? AlertPage
     : windowLabel === "timer"
       ? TimerPage
-      : App;
+      : windowLabel === "confirm"
+        ? ConfirmPage
+        : App;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
