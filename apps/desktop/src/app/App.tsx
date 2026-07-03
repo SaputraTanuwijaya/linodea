@@ -113,12 +113,21 @@ function App() {
   // avoids antivirus heuristics). The marker is set only once the user actually
   // answers (in the confirm-result handler below), so a prompt that fails to
   // show is retried next launch instead of being lost.
+  //
+  // Delayed: at cold startup the confirm window's webview may not be mounted yet,
+  // so an immediate `show_confirm` races (the kind event is emitted into a window
+  // that isn't listening → blank popup). Quitting works because it fires later,
+  // when the window is ready. The delay makes the first-run prompt take that same
+  // proven path. The native OS dialog this replaced had no such dependency.
   useEffect(() => {
     if (!isTauriRuntime()) return;
     if (localStorage.getItem(AUTOSTART_PROMPTED_KEY)) return;
-    void invoke("show_confirm", { payload: { kind: "autostart" } }).catch(
-      () => undefined,
-    );
+    const id = window.setTimeout(() => {
+      void invoke("show_confirm", { payload: { kind: "autostart" } }).catch(
+        () => undefined,
+      );
+    }, 1500);
+    return () => window.clearTimeout(id);
   }, []);
 
   useEffect(() => {
