@@ -29,6 +29,20 @@ export interface Strings {
     hide: string;
     quit: string;
   };
+  /** Confirmation shown before actually quitting (reminders stop when quit). */
+  quitConfirm: {
+    title: string;
+    body: string;
+    confirm: string;
+    cancel: string;
+  };
+  /** First-run prompt asking to enable launch-on-boot (recommended yes). */
+  autostartPrompt: {
+    title: string;
+    body: string;
+    enable: string;
+    notNow: string;
+  };
   placeholders: readonly string[];
   preview: {
     saving: string;
@@ -180,6 +194,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       settings: "Settings",
       hide: "Hide",
       quit: "Quit",
+    },
+    quitConfirm: {
+      title: "Quit Linodea?",
+      body: "Reminders only fire while Linodea is running. If you quit, you won't be notified until you open it again. Closing the window keeps it running in the tray.",
+      confirm: "Quit anyway",
+      cancel: "Keep running",
+    },
+    autostartPrompt: {
+      title: "Start Linodea automatically?",
+      body: "Linodea can only remind you while it's running. Start it automatically when you sign in so your reminders keep working after a restart. Recommended — you can change this any time in Settings.",
+      enable: "Yes, start on boot",
+      notNow: "Not now",
     },
     placeholders: [
       "in 20m check the oven",
@@ -357,6 +383,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       settings: "Pengaturan",
       hide: "Sembunyikan",
       quit: "Keluar",
+    },
+    quitConfirm: {
+      title: "Keluar dari Linodea?",
+      body: "Pengingat hanya berbunyi selama Linodea berjalan. Jika keluar, kamu tidak akan diingatkan sampai membukanya lagi. Menutup jendela tetap membiarkannya berjalan di tray.",
+      confirm: "Tetap keluar",
+      cancel: "Biarkan berjalan",
+    },
+    autostartPrompt: {
+      title: "Jalankan Linodea otomatis?",
+      body: "Linodea hanya bisa mengingatkanmu selama berjalan. Jalankan otomatis saat kamu masuk agar pengingat tetap bekerja setelah restart. Disarankan — bisa diubah kapan saja di Pengaturan.",
+      enable: "Ya, jalankan saat boot",
+      notNow: "Nanti saja",
     },
     placeholders: [
       "20 menit lagi cek oven",

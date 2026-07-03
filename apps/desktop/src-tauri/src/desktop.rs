@@ -10,6 +10,9 @@ const ALERT_WINDOW_LABEL: &str = "alert";
 const TIMER_WINDOW_LABEL: &str = "timer";
 const NOTIFY_EVENT: &str = "linodea:notify";
 const TIMER_EVENT: &str = "linodea:timer";
+/// Asks the webview to confirm before quitting (reminders stop when quit). The
+/// JS side runs the localized dialog, then invokes `quit_app` if confirmed.
+const CONFIRM_QUIT_EVENT: &str = "linodea:confirm-quit";
 const ALERT_SIZE: (f64, f64) = (360.0, 120.0);
 const TIMER_SIZE: (f64, f64) = (220.0, 120.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
@@ -206,7 +209,11 @@ fn setup_tray(app: &mut App) -> tauri::Result<()> {
             TRAY_MENU_HIDE => {
                 let _ = hide_main_window(app);
             }
-            TRAY_MENU_QUIT => app.exit(0),
+            TRAY_MENU_QUIT => {
+                // Route through the webview so the user gets the localized
+                // "reminders will stop" confirmation before actually exiting.
+                let _ = app.emit_to(MAIN_WINDOW_LABEL, CONFIRM_QUIT_EVENT, ());
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

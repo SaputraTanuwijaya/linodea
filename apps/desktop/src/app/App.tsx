@@ -21,6 +21,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
@@ -49,6 +50,7 @@ import {
 } from "@/widgets/popup-menu";
 
 const MODE_EVENT = "linodea:mode";
+const CONFIRM_QUIT_EVENT = "linodea:confirm-quit";
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
 type Mode = "capture" | "list" | "chain" | "settings";
@@ -57,6 +59,9 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
+  // Holds the latest confirm-quit handler so the tray-event listener (subscribed
+  // once) always runs the current-language version.
+  const confirmQuitRef = useRef<() => void>(() => undefined);
 
   const [mode, setMode] = useState<Mode>("capture");
   const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
@@ -103,6 +108,36 @@ function App() {
     void enableReminderNotifications().catch(() => undefined);
   }, []);
 
+  // First run only: ask to enable launch-on-boot. Reliability depends on the app
+  // staying running, so this is recommended — but we ask rather than silently
+  // adding a startup entry (more trustworthy, and avoids antivirus heuristics).
+  // The marker is set before the dialog so it never re-prompts.
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const PROMPTED_KEY = "linodea.autostart.promptedForBoot.v1";
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (localStorage.getItem(PROMPTED_KEY)) return;
+        localStorage.setItem(PROMPTED_KEY, "1");
+        const enable = await ask(strings.autostartPrompt.body, {
+          title: strings.autostartPrompt.title,
+          kind: "info",
+          okLabel: strings.autostartPrompt.enable,
+          cancelLabel: strings.autostartPrompt.notNow,
+        });
+        if (!cancelled) await setAutostart(enable);
+      } catch {
+        // Plugin/dialog unavailable (e.g. browser fallback) — leave OS untouched.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Mount-once: first-run prompt in the app's default language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
@@ -116,6 +151,28 @@ function App() {
       setSettingsFocus(parsed.settingsSection);
       setMenuAnchor(null);
     }).then((fn) => {
+      if (mounted) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let mounted = true;
+    let unlisten: UnlistenFn | undefined;
+
+    // Tray "Quit" emits this so the confirmation runs in the webview (localized,
+    // works even while the window is hidden in the tray).
+    void listen(CONFIRM_QUIT_EVENT, () => confirmQuitRef.current()).then((fn) => {
       if (mounted) {
         unlisten = fn;
       } else {
@@ -197,6 +254,28 @@ function App() {
     void openMenuAt(rect.left, rect.bottom + 4);
   }
 
+  // Quitting stops all reminders (they only fire while the app runs), so gate
+  // every quit path behind a localized confirmation. Both the popup menu and the
+  // tray Quit item funnel here; only "Quit anyway" actually exits.
+  async function confirmAndQuit() {
+    if (!isTauriRuntime()) return;
+    setMenuAnchor(null);
+    try {
+      const confirmed = await ask(strings.quitConfirm.body, {
+        title: strings.quitConfirm.title,
+        kind: "warning",
+        okLabel: strings.quitConfirm.confirm,
+        cancelLabel: strings.quitConfirm.cancel,
+      });
+      if (confirmed) await invoke("quit_app");
+    } catch {
+      // If the dialog can't render, honor the explicit quit intent rather than
+      // trapping the user with a dead menu item.
+      await invoke("quit_app").catch(() => undefined);
+    }
+  }
+  confirmQuitRef.current = confirmAndQuit;
+
   async function handleMenuAction(action: MenuAction) {
     setMenuAnchor(null);
     if (!isTauriRuntime()) return;
@@ -218,7 +297,7 @@ function App() {
           await invoke("hide_main_window");
           break;
         case "quit":
-          await invoke("quit_app");
+          await confirmAndQuit();
           break;
       }
     } catch {
