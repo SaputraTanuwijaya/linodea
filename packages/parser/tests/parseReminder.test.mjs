@@ -336,6 +336,36 @@ test("date word + bare 24-hour time still works", () => {
 });
 
 // Negatives — prove no false positives from number+word or colon-looking text.
+test("English absolute month day uses this year when ahead", () => {
+  const result = parseReminderWithNow("June 5 9am submit report", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-06-05T02:00:00.000Z");
+  assert.equal(result.draft.title, "submit report");
+  assert.deepEqual(result.issues, []);
+});
+
+test("Indonesian day month absolute date parses", () => {
+  const result = parseReminderWithNow("5 Juni jam 8 bayar listrik", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-06-05T01:00:00.000Z");
+  assert.equal(result.draft.title, "bayar listrik");
+});
+
+test("Indonesian tanggal without month rolls to next month when day passed", () => {
+  const result = parseReminderWithNow("tanggal 17 jam 8 bayar tagihan", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-06-17T01:00:00.000Z");
+  assert.equal(result.draft.title, "bayar tagihan");
+});
+
+test("absolute calendar date without time needs a clock time", () => {
+  const result = parseReminderWithNow("June 5 submit report", options);
+
+  assert.equal(result.draft.scheduledAt, undefined);
+  assert.equal(result.draft.title, "submit report");
+  assert.equal(result.issues[0].code, "missing_time");
+});
+
 for (const phrase of [
   "buy 2 apples",
   "run 5 miles",

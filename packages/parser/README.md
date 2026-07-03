@@ -40,6 +40,14 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 - `tomorrow`, `besok`
 - `lusa`
 
+### Absolute calendar dates
+
+- Month + day: `June 5 9am`, `5 Juni jam 8`, `tanggal 17 jam 8`.
+- English and Indonesian month names/short forms are recognized exactly.
+- Month+day without a year resolves to this year, or next year if that local date/time has already passed.
+- `tanggal N` / `tgl N` without a month resolves to this month, or next month if that local day/time has already passed.
+- A calendar date without a clock time emits `missing_time` and does not schedule.
+
 ### Clock time
 
 - `8am`, `8:30pm`
@@ -129,7 +137,7 @@ Autocorrects cost confidence at half the rate of hard issues (0.05 per correctio
 ## Known limits
 
 - No natural-language grammar beyond the listed rules.
-- No absolute calendar dates like `June 5`.
+- Absolute calendar dates are exact-match only; typo/fuzzy month names are not supported.
 - Relative duration units are seconds/minutes/hours/days only — `in 3 weeks` / `in three months` don't parse as one-offs (weeks/months exist only as recurrence cadences). Affects digits and spelled numbers equally.
 - Spelled numbers cap at single tokens + tens — no compounds (`twenty-five`) or fractions (`half`).
 - `H-1` marks type as `prep` but does not infer scheduled time without an anchor event.

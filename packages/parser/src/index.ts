@@ -405,7 +405,8 @@ function parseDateTime(
     };
   }
 
-  const relative = findRelativeTime(input);
+  const earlyCalendarDate = findCalendarDate(input)?.match;
+  const relative = earlyCalendarDate ? undefined : findRelativeTime(input);
   if (relative) {
     const clock = relative.days !== undefined ? findClockTime(input) : undefined;
     if (clock && relative.days !== undefined) {
@@ -458,10 +459,17 @@ function parseDateTime(
   const dateFinding = findDateOffset(input, preferredLanguage);
   const dateMatch = dateFinding?.match;
   const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
+  const calendarDate = earlyCalendarDate;
   const time = findClockTime(input);
   const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
+  const calendarConnector =
+    calendarDate && time
+      ? findRelativeClockConnector(input, calendarDate.segment.end, time.segment.start)
+      : undefined;
   const segments = [
     ...(dateMatch ? [dateMatch.segment] : []),
+    ...(calendarDate ? [calendarDate.segment] : []),
+    ...(calendarConnector ? [calendarConnector] : []),
     ...(time ? [time.segment] : []),
   ];
 
@@ -481,6 +489,28 @@ function parseDateTime(
       ),
       segments,
       issues: [...dateIssues, ...timeIssues],
+      hasScheduledAt: true,
+      hasDate: true,
+      hasTime: true,
+    };
+  }
+
+  if (calendarDate && time) {
+    const baseDate = resolveCalendarDate(calendarDate, now, timezone, time.parts);
+    return {
+      scheduledAt: localDateTimeToUtcIso(
+        {
+          year: baseDate.year,
+          month: baseDate.month,
+          day: baseDate.day,
+          hour: time.parts.hour,
+          minute: time.parts.minute,
+          second: 0,
+        },
+        timezone,
+      ),
+      segments,
+      issues: timeIssues,
       hasScheduledAt: true,
       hasDate: true,
       hasTime: true,
@@ -514,6 +544,21 @@ function parseDateTime(
         {
           code: "missing_time",
           message: "A date was found, but no clock time was found.",
+        },
+      ],
+      hasScheduledAt: false,
+      hasDate: true,
+      hasTime: false,
+    };
+  }
+
+  if (calendarDate) {
+    return {
+      segments,
+      issues: [
+        {
+          code: "missing_time",
+          message: "A calendar date was found, but no clock time was found.",
         },
       ],
       hasScheduledAt: false,
@@ -797,6 +842,17 @@ interface DateOffsetFinding {
   issue?: ParserIssue;
 }
 
+interface CalendarDateMatch {
+  day: number;
+  month?: number;
+  year?: number;
+  segment: TextSegment;
+}
+
+interface CalendarDateFinding {
+  match: CalendarDateMatch;
+}
+
 function findDateOffset(
   input: string,
   preferredLanguage: PreferredLanguage,
@@ -869,6 +925,153 @@ function findDateOffset(
       "date word",
     ),
   };
+}
+
+const MONTH_INDEX: Record<string, number> = {
+  jan: 1, january: 1, januari: 1,
+  feb: 2, february: 2, februari: 2,
+  mar: 3, march: 3, maret: 3,
+  apr: 4, april: 4,
+  may: 5, mei: 5,
+  jun: 6, june: 6, juni: 6,
+  jul: 7, july: 7, juli: 7,
+  aug: 8, august: 8, agustus: 8, agu: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, oktober: 10, okt: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12, desember: 12, des: 12,
+};
+
+const MONTH_ALTERNATION = Object.keys(MONTH_INDEX)
+  .sort((a, b) => b.length - a.length)
+  .join("|");
+
+function findCalendarDate(input: string): CalendarDateFinding | undefined {
+  const monthDay = new RegExp(
+    `\\b(?:on\\s+)?(${MONTH_ALTERNATION})\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?\\b`,
+    "i",
+  ).exec(input);
+  if (monthDay?.index !== undefined) {
+    const month = MONTH_INDEX[monthDay[1].toLowerCase()];
+    const day = Number(monthDay[2]);
+    const year = monthDay[3] ? Number(monthDay[3]) : undefined;
+    if (isValidCalendarDate(day, month, year)) {
+      return {
+        match: {
+          day,
+          month,
+          year,
+          segment: {
+            start: monthDay.index,
+            end: monthDay.index + monthDay[0].length,
+          },
+        },
+      };
+    }
+  }
+
+  const dayMonth = new RegExp(
+    `\\b(?:on\\s+|pada\\s+)?(\\d{1,2})\\s+(${MONTH_ALTERNATION})\\.?(?:\\s+(\\d{4}))?\\b`,
+    "i",
+  ).exec(input);
+  if (dayMonth?.index !== undefined) {
+    const day = Number(dayMonth[1]);
+    const month = MONTH_INDEX[dayMonth[2].toLowerCase()];
+    const year = dayMonth[3] ? Number(dayMonth[3]) : undefined;
+    if (isValidCalendarDate(day, month, year)) {
+      return {
+        match: {
+          day,
+          month,
+          year,
+          segment: {
+            start: dayMonth.index,
+            end: dayMonth.index + dayMonth[0].length,
+          },
+        },
+      };
+    }
+  }
+
+  const tanggal = new RegExp(
+    `\\b(?:pada\\s+)?(?:tanggal|tgl)\\s+(\\d{1,2})(?:\\s+(${MONTH_ALTERNATION})\\.?)?(?:\\s+(\\d{4}))?\\b`,
+    "i",
+  ).exec(input);
+  if (tanggal?.index !== undefined) {
+    const day = Number(tanggal[1]);
+    const month = tanggal[2]
+      ? MONTH_INDEX[tanggal[2].toLowerCase()]
+      : undefined;
+    const year = tanggal[3] ? Number(tanggal[3]) : undefined;
+    if (isValidCalendarDate(day, month, year)) {
+      return {
+        match: {
+          day,
+          month,
+          year,
+          segment: {
+            start: tanggal.index,
+            end: tanggal.index + tanggal[0].length,
+          },
+        },
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function resolveCalendarDate(
+  match: CalendarDateMatch,
+  now: Date,
+  timezone: IanaTimezone,
+  time: TimeParts,
+): { year: number; month: number; day: number } {
+  const localNow = getLocalParts(now, timezone);
+  let year = match.year ?? localNow.year;
+  let month = match.month ?? localNow.month;
+
+  const candidate = () =>
+    localDateTimeToUtcDate(
+      {
+        year,
+        month,
+        day: match.day,
+        hour: time.hour,
+        minute: time.minute,
+        second: 0,
+      },
+      timezone,
+    );
+
+  if (!match.year && candidate().getTime() <= now.getTime()) {
+    if (match.month) {
+      year += 1;
+    } else {
+      month += 1;
+      if (month > 12) {
+        month = 1;
+        year += 1;
+      }
+    }
+  }
+
+  return { year, month, day: match.day };
+}
+
+function isValidCalendarDate(day: number, month?: number, year?: number): boolean {
+  if (day < 1 || day > 31) return false;
+  if (month !== undefined && (month < 1 || month > 12)) return false;
+  if (year !== undefined && (year < 1970 || year > 9999)) return false;
+  if (month === undefined) return true;
+
+  const probeYear = year ?? 2024;
+  const date = new Date(Date.UTC(probeYear, month - 1, day));
+  return (
+    date.getUTCFullYear() === probeYear &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function makeAutocorrectIssue(
