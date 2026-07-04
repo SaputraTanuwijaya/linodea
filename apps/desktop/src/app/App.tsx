@@ -160,6 +160,11 @@ function App() {
           void invoke("mark_boot_prompt_answered").catch(() => undefined);
           void setAutostart(confirmed);
           void invoke("enter_capture_mode").catch(() => undefined);
+        } else if (kind === "autostartOff") {
+          // Confirming means "yes, turn it off". The confirm window stole focus
+          // and hid Settings, so reopen Settings to show the toggle's new state.
+          if (confirmed) void setAutostart(false);
+          void invoke("enter_settings_mode").catch(() => undefined);
         }
       },
     ).then((fn) => {

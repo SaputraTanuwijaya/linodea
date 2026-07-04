@@ -3,8 +3,10 @@
  *
  * Rust shows this small, centered, always-on-top window when the app needs a
  * yes/no decision that must survive the main window being hidden:
- *   - "quit"      — quitting stops all reminders, so ask first.
- *   - "autostart" — first-run prompt to enable launch-on-boot (recommended).
+ *   - "quit"         — quitting stops all reminders, so ask first.
+ *   - "autostart"    — first-run prompt to enable launch-on-boot (recommended).
+ *   - "autostartOff" — confirm turning OFF launch-on-startup in Settings
+ *                      (reduces reliability the same way quitting does).
  *
  * Themed + i18n like the rest of the app, so it replaces the native OS dialog
  * (which read as an error/system alert and broke the app's visual language).
@@ -22,7 +24,7 @@ import { stringsFor } from "@/shared/i18n";
 const CONFIRM_EVENT = "linodea:confirm";
 const RESULT_EVENT = "linodea:confirm-result";
 
-type ConfirmKind = "quit" | "autostart";
+type ConfirmKind = "quit" | "autostart" | "autostartOff";
 
 interface ConfirmPayload {
   kind: ConfirmKind;
@@ -74,6 +76,16 @@ export function ConfirmPage() {
         primaryConfirmed: true,
         secondaryLabel: strings.autostartPrompt.notNow,
         secondaryDanger: false,
+      };
+    }
+    if (kind === "autostartOff") {
+      return {
+        title: strings.disableAutostartConfirm.title,
+        body: strings.disableAutostartConfirm.body,
+        primaryLabel: strings.disableAutostartConfirm.keepOn, // recommended
+        primaryConfirmed: false,
+        secondaryLabel: strings.disableAutostartConfirm.turnOff,
+        secondaryDanger: true,
       };
     }
     return null;

@@ -43,6 +43,13 @@ export interface Strings {
     enable: string;
     notNow: string;
   };
+  /** Confirmation shown before turning OFF launch-on-startup in Settings. */
+  disableAutostartConfirm: {
+    title: string;
+    body: string;
+    keepOn: string;
+    turnOff: string;
+  };
   placeholders: readonly string[];
   preview: {
     saving: string;
@@ -208,6 +215,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       body: "Linodea can only remind you while it's running. Start it automatically when you sign in so your reminders keep working after a restart. Recommended — you can change this any time in Settings.",
       enable: "Yes, start on boot",
       notNow: "Not now",
+    },
+    disableAutostartConfirm: {
+      title: "Turn off launch on startup?",
+      body: "Linodea only reminds you while it's running. If it doesn't start automatically, your reminders won't fire after a restart until you open it yourself. You can turn this back on any time.",
+      keepOn: "Keep it on",
+      turnOff: "Turn off anyway",
     },
     placeholders: [
       "in 20m check the oven",
@@ -399,6 +412,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       body: "Linodea hanya bisa mengingatkanmu selama berjalan. Jalankan otomatis saat kamu masuk agar pengingat tetap bekerja setelah restart. Disarankan — bisa diubah kapan saja di Pengaturan.",
       enable: "Ya, jalankan saat boot",
       notNow: "Nanti saja",
+    },
+    disableAutostartConfirm: {
+      title: "Matikan jalan otomatis saat startup?",
+      body: "Linodea hanya mengingatkanmu selama berjalan. Jika tidak jalan otomatis, pengingat tidak akan berbunyi setelah restart sampai kamu membukanya sendiri. Bisa diaktifkan lagi kapan saja.",
+      keepOn: "Biarkan aktif",
+      turnOff: "Tetap matikan",
     },
     placeholders: [
       "20 menit lagi cek oven",
