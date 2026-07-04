@@ -62,6 +62,12 @@ export interface DueNotificationResult {
   autoDoneCount: number;
   /** Reminders currently in the `missed` state (surfaced, awaiting the user). */
   missedCount: number;
+  /**
+   * Reminders this pass *transitioned* into `missed` (were pending/snoozed
+   * before). Non-zero means an open list is now stale and must re-fetch — it
+   * read the reminders before this async pass wrote the new status.
+   */
+  newlyMissed: number;
   permissionGranted: boolean;
   /**
    * Epoch-ms of the earliest still-unfired prealert or due fire across all
@@ -114,6 +120,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   let sentCount = 0;
   let autoDoneCount = 0;
   let missedCount = 0;
+  let newlyMissed = 0;
   let nextFireMs = Infinity;
 
   for (const reminder of actionable) {
@@ -142,6 +149,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
           updatedAt: new Date(now).toISOString(),
         });
         missedCount += 1;
+        newlyMissed += 1;
       } catch {
         // DB write failed; leave it pending and let a later pass retry.
       }
@@ -252,6 +260,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     sentCount,
     autoDoneCount,
     missedCount,
+    newlyMissed,
     permissionGranted,
     nextFireMs: Number.isFinite(nextFireMs) ? nextFireMs : undefined,
   };

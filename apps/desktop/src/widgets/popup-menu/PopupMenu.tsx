@@ -25,12 +25,15 @@ const MENU_HEIGHT = 256;
 export function PopupMenu({
   anchor,
   menuRef,
+  missedCount = 0,
   mode,
   onAction,
   strings,
 }: {
   anchor: MenuAnchor;
   menuRef: RefObject<HTMLDivElement | null>;
+  /** Missed-reminder count, badged on the Reminders item (matches the ••• dot). */
+  missedCount?: number;
   mode: PopupMenuMode;
   onAction: (action: MenuAction) => void;
   strings: Strings;
@@ -50,6 +53,7 @@ export function PopupMenu({
         onClick={() => onAction("capture")}
       />
       <MenuItem
+        badge={missedCount}
         disabled={mode === "list"}
         label={strings.menu.reminders}
         onClick={() => onAction("list")}
@@ -76,18 +80,20 @@ export function PopupMenu({
 }
 
 function MenuItem({
+  badge = 0,
   disabled,
   label,
   onClick,
   variant,
 }: {
+  badge?: number;
   disabled?: boolean;
   label: string;
   onClick: () => void;
   variant?: "danger";
 }) {
   const base =
-    "w-full rounded-md px-3 py-1.5 text-left text-sm transition disabled:cursor-default";
+    "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition disabled:cursor-default";
   const tone = disabled
     ? "text-[var(--lin-text-mute)]"
     : variant === "danger"
@@ -102,7 +108,12 @@ function MenuItem({
       role="menuitem"
       type="button"
     >
-      {label}
+      <span className="truncate">{label}</span>
+      {badge > 0 ? (
+        <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--lin-danger)] px-1 text-[10px] font-bold leading-none text-white">
+          {badge > 9 ? "9+" : badge}
+        </span>
+      ) : null}
     </button>
   );
 }

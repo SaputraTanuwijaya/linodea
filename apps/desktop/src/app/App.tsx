@@ -21,7 +21,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import "./App.css";
@@ -99,6 +99,20 @@ function App() {
       setAutostart,
       aiAssist,
     ],
+  );
+
+  // Apply a scheduler pass's result: update the missed badge, and if the pass
+  // just moved reminders into `missed`, bump the list refresh signal. Marking
+  // missed is async; without this an already-open list keeps showing them as
+  // pending (it read the rows before the pass wrote the new status) until it's
+  // reopened. A coalesced pass returns undefined, so this no-ops for those.
+  const applySyncResult = useCallback(
+    (result?: { missedCount: number; newlyMissed: number }) => {
+      if (!result) return;
+      setMissedCount(result.missedCount);
+      if (result.newlyMissed > 0) setListRefreshKey((k) => k + 1);
+    },
+    [],
   );
 
   // --- Mount-time effects --------------------------------------------------
@@ -186,24 +200,39 @@ function App() {
 
     const scheduler = startReminderNotificationScheduler();
     schedulerRef.current = scheduler;
-    void scheduler.sync().then((r) => {
-      if (r) setMissedCount(r.missedCount);
-    });
+
+    // The very first sync can land before the Tauri IPC bridge is ready at cold
+    // start; `listReminderNodes()` then fails, the scheduler swallows it, and
+    // nothing is marked missed — so the badge/list only caught up on a later
+    // interaction-triggered sync (the reported bug). `sync()` returns a result
+    // on success and `undefined` on failure, so retry a few times until one
+    // lands. (The 15s backstop would eventually recover it; this just makes the
+    // first pass prompt so the missed badge shows right after relaunch.)
+    let cancelled = false;
+    void (async () => {
+      for (let attempt = 0; attempt < 6 && !cancelled; attempt += 1) {
+        const result = await scheduler.sync();
+        if (cancelled) return;
+        if (result) {
+          applySyncResult(result);
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+      }
+    })();
 
     // Re-sync when the window regains focus: cheap reconciliation after the
     // machine wakes or the popup is summoned, on top of the precise timer.
-    const onFocus = () =>
-      void scheduler.sync().then((r) => {
-        if (r) setMissedCount(r.missedCount);
-      });
+    const onFocus = () => void scheduler.sync().then(applySyncResult);
     window.addEventListener("focus", onFocus);
 
     return () => {
+      cancelled = true;
       window.removeEventListener("focus", onFocus);
       scheduler.stop();
       schedulerRef.current = null;
     };
-  }, []);
+  }, [applySyncResult]);
 
   useEffect(() => {
     function onFocus() {
@@ -212,6 +241,14 @@ function App() {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  // Opening the reminder list runs a scheduler pass first, so any reminder that
+  // just crossed into `missed` is marked before/at open time rather than waiting
+  // for the next backstop tick. `applySyncResult` then refreshes the open list.
+  useEffect(() => {
+    if (mode !== "list" || !isTauriRuntime()) return;
+    void schedulerRef.current?.sync().then(applySyncResult);
+  }, [mode, applySyncResult]);
 
   // --- Menu lifecycle ------------------------------------------------------
 
@@ -318,9 +355,7 @@ function App() {
                 // Arm a precise timer for the reminder just captured (e.g. an
                 // "in 1m" boiling-water reminder fires on the second, not on the
                 // next coarse backstop tick).
-                void schedulerRef.current?.sync().then((r) => {
-                  if (r) setMissedCount(r.missedCount);
-                });
+                void schedulerRef.current?.sync().then(applySyncResult);
               }}
               shouldHideAfterSave={mode === "capture"}
               strings={strings}
@@ -331,11 +366,7 @@ function App() {
         {mode === "list" ? (
           <ListPage
             language={language}
-            onMutate={() =>
-              void schedulerRef.current?.sync().then((r) => {
-                if (r) setMissedCount(r.missedCount);
-              })
-            }
+            onMutate={() => void schedulerRef.current?.sync().then(applySyncResult)}
             refreshKey={listRefreshKey}
             strings={strings}
           />
@@ -354,6 +385,7 @@ function App() {
         <PopupMenu
           anchor={menuAnchor}
           menuRef={menuRef}
+          missedCount={missedCount}
           mode={mode}
           onAction={handleMenuAction}
           strings={strings}
