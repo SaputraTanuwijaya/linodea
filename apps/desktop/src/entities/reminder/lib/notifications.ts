@@ -44,12 +44,24 @@ const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
 const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
 const MAX_STORED_REMINDER_RECORDS = 500;
 const MS_PER_MINUTE = 60_000;
+/**
+ * Grace window for the "missed while the app was off" rule. While the app runs,
+ * the precise timer / 15s backstop fires a reminder within ~15s of its due time.
+ * So a non-recurring reminder that is still unfired and more than this far past
+ * due means the app almost certainly wasn't running when it came due — mark it
+ * `missed` (persistent, surfaced in the list) instead of firing a stale alert
+ * and auto-doning it, which would "silently" complete it if the user wasn't
+ * looking. Reminders due within the grace are treated as a normal on-time fire.
+ */
+const MISSED_GRACE_MS = 60_000;
 
 export type NotificationPermissionState = "unknown" | "granted" | "denied";
 
 export interface DueNotificationResult {
   sentCount: number;
   autoDoneCount: number;
+  /** Reminders currently in the `missed` state (surfaced, awaiting the user). */
+  missedCount: number;
   permissionGranted: boolean;
   /**
    * Epoch-ms of the earliest still-unfired prealert or due fire across all
@@ -82,6 +94,8 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
 /**
  * Poll-tick driver. Reads the current prealert config, walks every
  * actionable reminder, and:
+ *   - marks a non-recurring reminder `missed` if it came due while the app was
+ *     off (well past due, never fired) — no stale alert, no auto-done,
  *   - fires any prealert whose window has been crossed and not yet fired,
  *   - fires the T-due toast (once) when due time has passed,
  *   - immediately auto-marks the reminder `done` after the T-due fire.
@@ -99,6 +113,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const now = Date.now();
   let sentCount = 0;
   let autoDoneCount = 0;
+  let missedCount = 0;
   let nextFireMs = Infinity;
 
   for (const reminder of actionable) {
@@ -108,6 +123,30 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     }
     const createdMs = new Date(reminder.createdAt).getTime();
     const record: FireRecord = store[reminder.id] ?? {};
+
+    // Already surfaced as `missed` — inert here; it waits in the list until the
+    // user marks it done, reschedules (edit revives it), or deletes it.
+    if (reminder.status === "missed") {
+      missedCount += 1;
+      continue;
+    }
+
+    // Came due while the app was off (well past due, never fired): mark it
+    // `missed` instead of firing a stale alert and auto-doning it. Recurring
+    // reminders are left to roll forward on their own (existing fire+advance).
+    if (!record.due && !reminder.recurrence && dueMs <= now - MISSED_GRACE_MS) {
+      try {
+        await updateReminderNodeStatus({
+          id: reminder.id,
+          status: "missed",
+          updatedAt: new Date(now).toISOString(),
+        });
+        missedCount += 1;
+      } catch {
+        // DB write failed; leave it pending and let a later pass retry.
+      }
+      continue;
+    }
 
     // Prealerts -------------------------------------------------------
     for (const offset of sortedOffsets) {
@@ -212,6 +251,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   return {
     sentCount,
     autoDoneCount,
+    missedCount,
     permissionGranted,
     nextFireMs: Number.isFinite(nextFireMs) ? nextFireMs : undefined,
   };

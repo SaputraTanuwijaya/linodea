@@ -62,7 +62,18 @@ export function ListPage({
     setIsLoading(true);
     try {
       const all = await listReminderNodes();
-      setReminders(all.filter(isActionable).sort(byScheduledAt));
+      // Missed reminders sort to the top (they need attention), then the rest
+      // by scheduled time.
+      setReminders(
+        all
+          .filter(isActionable)
+          .sort((a, b) => {
+            const aMissed = a.status === "missed" ? 0 : 1;
+            const bMissed = b.status === "missed" ? 0 : 1;
+            if (aMissed !== bMissed) return aMissed - bMissed;
+            return byScheduledAt(a, b);
+          }),
+      );
     } catch {
       // Silent.
     } finally {
@@ -130,26 +141,40 @@ export function ListPage({
   function handleSaveEdit(reminder: ReminderNode) {
     const parsed = parseReminder(editText, { preferredLanguage: language });
     if (!parsed.draft.scheduledAt) return;
-    void runMutation(reminder.id, () =>
-      updateReminderNode({
+    const scheduledAt = parsed.draft.scheduledAt;
+    void runMutation(reminder.id, async () => {
+      await updateReminderNode({
         id: reminder.id,
         title: parsed.draft.title,
         rawInput: parsed.rawInput,
-        scheduledAt: parsed.draft.scheduledAt!,
+        scheduledAt,
         timezone: parsed.draft.timezone,
         type: parsed.draft.type,
         category: parsed.draft.category,
         checklist: parsed.draft.checklist,
         recurrence: parsed.draft.recurrence,
         updatedAt: new Date().toISOString(),
-      }),
-    );
+      });
+      // Editing re-specifies the reminder, so revive it: a missed/snoozed one
+      // returns to `pending` (the edit command deliberately doesn't touch
+      // status), and clearing the fire record lets it fire fresh at the new time.
+      clearReminderFireRecord(reminder.id);
+      if (reminder.status !== "pending") {
+        await updateReminderNodeStatus({
+          id: reminder.id,
+          status: "pending",
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    });
   }
 
   function beginEdit(reminder: ReminderNode) {
     setEditText(reminder.rawInput);
     setRowAction({ id: reminder.id, mode: "edit" });
   }
+
+  const missedCount = reminders.filter((r) => r.status === "missed").length;
 
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
@@ -158,7 +183,15 @@ export function ListPage({
           {strings.list.queued}
         </p>
         <p className="text-xs text-[var(--lin-text-mute)]">
-          {strings.list.pending(reminders.length)}
+          {missedCount > 0 ? (
+            <>
+              <span className="font-semibold text-[var(--lin-danger)]">
+                {strings.list.missedCount(missedCount)}
+              </span>
+              {" · "}
+            </>
+          ) : null}
+          {strings.list.pending(reminders.length - missedCount)}
         </p>
       </header>
       {isLoading && reminders.length === 0 ? (
@@ -242,8 +275,15 @@ export function ListPage({
                   <p className="truncate text-sm font-medium text-[var(--lin-text)]">
                     {reminder.title}
                   </p>
-                  <p className="truncate text-xs text-[var(--lin-text-dim)]">
-                    {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
+                  <p className="flex items-center gap-1.5 truncate text-xs text-[var(--lin-text-dim)]">
+                    {reminder.status === "missed" ? (
+                      <span className="flex-none rounded bg-[var(--lin-danger-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--lin-danger)]">
+                        {strings.list.missed}
+                      </span>
+                    ) : null}
+                    <span className="truncate">
+                      {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
+                    </span>
                   </p>
                   {reminder.recurrence ? (
                     <p className="truncate text-xs text-[var(--lin-text-mute)]">

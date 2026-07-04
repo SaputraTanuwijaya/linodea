@@ -63,6 +63,10 @@ function App() {
   const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
+  // Count of reminders sitting in the `missed` state, read from each scheduler
+  // sync. Surfaced as a badge on the capture bar's menu button so a user who
+  // relaunches (landing in capture, not the list) sees they have missed items.
+  const [missedCount, setMissedCount] = useState(0);
 
   const [theme, setTheme] = useTheme();
   const [language, setLanguage] = useLanguage();
@@ -177,11 +181,16 @@ function App() {
 
     const scheduler = startReminderNotificationScheduler();
     schedulerRef.current = scheduler;
-    void scheduler.sync();
+    void scheduler.sync().then((r) => {
+      if (r) setMissedCount(r.missedCount);
+    });
 
     // Re-sync when the window regains focus: cheap reconciliation after the
     // machine wakes or the popup is summoned, on top of the precise timer.
-    const onFocus = () => void scheduler.sync();
+    const onFocus = () =>
+      void scheduler.sync().then((r) => {
+        if (r) setMissedCount(r.missedCount);
+      });
     window.addEventListener("focus", onFocus);
 
     return () => {
@@ -297,13 +306,16 @@ function App() {
               aiAssist={aiAssist}
               inputRef={inputRef}
               language={language}
+              missedCount={missedCount}
               onMenuButtonClick={handleMenuButtonClick}
               onSaved={() => {
                 setListRefreshKey((k) => k + 1);
                 // Arm a precise timer for the reminder just captured (e.g. an
                 // "in 1m" boiling-water reminder fires on the second, not on the
                 // next coarse backstop tick).
-                void schedulerRef.current?.sync();
+                void schedulerRef.current?.sync().then((r) => {
+                  if (r) setMissedCount(r.missedCount);
+                });
               }}
               shouldHideAfterSave={mode === "capture"}
               strings={strings}
@@ -314,7 +326,11 @@ function App() {
         {mode === "list" ? (
           <ListPage
             language={language}
-            onMutate={() => void schedulerRef.current?.sync()}
+            onMutate={() =>
+              void schedulerRef.current?.sync().then((r) => {
+                if (r) setMissedCount(r.missedCount);
+              })
+            }
             refreshKey={listRefreshKey}
             strings={strings}
           />

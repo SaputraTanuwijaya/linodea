@@ -73,6 +73,7 @@ export function CapturePage({
   aiAssist,
   inputRef,
   language,
+  missedCount = 0,
   onMenuButtonClick,
   onSaved,
   shouldHideAfterSave,
@@ -82,6 +83,8 @@ export function CapturePage({
   /** Forwarded so App.tsx can refocus the input on window focus events. */
   inputRef: RefObject<HTMLInputElement | null>;
   language: LanguageId;
+  /** Reminders in the `missed` state; shown as a badge on the menu button. */
+  missedCount?: number;
   onMenuButtonClick: (event: ReactMouseEvent) => void;
   /** Called after a successful save; App.tsx uses this to refresh the list. */
   onSaved: () => void;
@@ -621,13 +624,18 @@ export function CapturePage({
         ) : null}
       </div>
       <button
-        aria-label="Open menu"
+        aria-label={missedCount > 0 ? strings.list.missedCount(missedCount) : "Open menu"}
         className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs leading-none text-[var(--lin-text-dim)] transition hover:bg-[var(--lin-bg-hover)] hover:text-[var(--lin-text)]"
         onClick={onMenuButtonClick}
         tabIndex={-1}
         type="button"
       >
         •••
+        {missedCount > 0 ? (
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--lin-danger)] px-1 text-[9px] font-bold leading-none text-white">
+            {missedCount > 9 ? "9+" : missedCount}
+          </span>
+        ) : null}
       </button>
     </form>
   );
