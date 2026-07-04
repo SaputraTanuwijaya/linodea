@@ -281,15 +281,29 @@ fn take_pending_confirm() -> Option<String> {
 }
 
 #[tauri::command]
+fn mark_boot_prompt_answered(app: tauri::AppHandle) {
+    desktop::mark_boot_prompt_answered(&app);
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first: on a second launch the plugin routes to this
+        // callback in the already-running instance and exits the new process, so
+        // a double-click surfaces the existing app instead of spawning a second
+        // tray. (Tauri requires single-instance be the first plugin.)
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            let _ = desktop::show_capture_mode(app);
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            // Tag boot launches so setup() can tell them from manual launches and
+            // keep them hidden (start-minimized) while surfacing manual launches.
+            Some(vec!["--autostarted"]),
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -301,6 +315,21 @@ pub fn run() {
             });
             desktop::setup_desktop_integration(app)?;
             shortcut::setup_global_shortcut(app)?;
+
+            // Startup visibility. Boot launches (autostart, tagged above) stay
+            // hidden. A manual launch surfaces something so the user knows the app
+            // is running: the first-run launch-on-boot prompt if unanswered, else
+            // the capture bar. The prompt is triggered here — in unthrottled Rust
+            // setup — instead of a hidden-window JS timer, which fired unreliably.
+            let launched_on_boot = std::env::args().any(|arg| arg == "--autostarted");
+            if !launched_on_boot {
+                let handle = app.handle();
+                if desktop::is_boot_prompt_answered(handle) {
+                    let _ = desktop::show_capture_mode(handle);
+                } else {
+                    let _ = desktop::prompt_launch_on_boot(handle);
+                }
+            }
 
             Ok(())
         })
@@ -337,6 +366,7 @@ pub fn run() {
             show_confirm,
             dismiss_confirm,
             take_pending_confirm,
+            mark_boot_prompt_answered,
             quit_app
         ])
         .run(tauri::generate_context!())

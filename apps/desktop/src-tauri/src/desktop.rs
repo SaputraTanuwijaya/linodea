@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -166,6 +167,48 @@ pub fn take_pending_confirm() -> Option<String> {
         .lock()
         .ok()
         .and_then(|mut pending| pending.take())
+}
+
+const BOOT_PROMPT_MARKER: &str = "boot_prompt_answered";
+
+fn boot_prompt_marker_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join(BOOT_PROMPT_MARKER))
+}
+
+/// Whether the first-run launch-on-boot prompt has already been answered.
+/// Persisted as a marker file, decided in Rust at startup. This deliberately
+/// replaces the old localStorage flag + hidden-window `setTimeout`: WebView2
+/// throttles/suspends timers in the hidden main window (the same reason the
+/// scheduler needs its 15s backstop), so the prompt fired unreliably. Rust
+/// setup runs unthrottled, so the trigger is now deterministic.
+pub fn is_boot_prompt_answered(app: &AppHandle) -> bool {
+    boot_prompt_marker_path(app)
+        .map(|path| path.exists())
+        .unwrap_or(false)
+}
+
+/// Record that the user answered the boot prompt (either choice) so it isn't
+/// shown again. Best-effort: a write failure just means we may re-ask next launch.
+pub fn mark_boot_prompt_answered(app: &AppHandle) {
+    if let Some(path) = boot_prompt_marker_path(app) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, b"1");
+    }
+}
+
+/// Show the first-run launch-on-boot prompt in the themed confirm window.
+pub fn prompt_launch_on_boot(app: &AppHandle) -> tauri::Result<()> {
+    show_confirm(
+        app,
+        ConfirmPayload {
+            kind: "autostart".into(),
+        },
+    )
 }
 
 fn confirm_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {

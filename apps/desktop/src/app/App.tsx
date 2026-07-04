@@ -50,9 +50,6 @@ import {
 
 const MODE_EVENT = "linodea:mode";
 const CONFIRM_RESULT_EVENT = "linodea:confirm-result";
-// Bumped v1 -> v2: v1 was set by the earlier native-dialog build even when its
-// prompt failed to show, so existing installs would never see the new prompt.
-const AUTOSTART_PROMPTED_KEY = "linodea.autostart.promptedForBoot.v2";
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
 type Mode = "capture" | "list" | "chain" | "settings";
@@ -107,28 +104,10 @@ function App() {
     void enableReminderNotifications().catch(() => undefined);
   }, []);
 
-  // First run only: prompt to enable launch-on-boot via the themed confirm
-  // window. Reliability depends on the app staying running, so it's recommended
-  // — but we ask rather than silently adding a startup entry (more trustworthy,
-  // avoids antivirus heuristics). The marker is set only once the user actually
-  // answers (in the confirm-result handler below), so a prompt that fails to
-  // show is retried next launch instead of being lost.
-  //
-  // Delayed: at cold startup the confirm window's webview may not be mounted yet,
-  // so an immediate `show_confirm` races (the kind event is emitted into a window
-  // that isn't listening → blank popup). Quitting works because it fires later,
-  // when the window is ready. The delay makes the first-run prompt take that same
-  // proven path. The native OS dialog this replaced had no such dependency.
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    if (localStorage.getItem(AUTOSTART_PROMPTED_KEY)) return;
-    const id = window.setTimeout(() => {
-      void invoke("show_confirm", { payload: { kind: "autostart" } }).catch(
-        () => undefined,
-      );
-    }, 1500);
-    return () => window.clearTimeout(id);
-  }, []);
+  // The first-run launch-on-boot prompt is triggered from Rust setup() (see
+  // desktop::prompt_launch_on_boot). It used to fire from a hidden-window
+  // setTimeout here, but WebView2 throttles timers in the hidden main window, so
+  // it fired unreliably. Rust owns the trigger + the answered marker now.
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -171,9 +150,12 @@ function App() {
         if (kind === "quit") {
           if (confirmed) void invoke("quit_app").catch(() => undefined);
         } else if (kind === "autostart") {
-          // Mark answered only now, so a prompt that never showed retries later.
-          localStorage.setItem(AUTOSTART_PROMPTED_KEY, "1");
+          // Persist "answered" in Rust so the prompt isn't shown again, apply the
+          // choice, then surface the capture bar so first-run lands in the app
+          // (the main window was hidden while the prompt was up).
+          void invoke("mark_boot_prompt_answered").catch(() => undefined);
           void setAutostart(confirmed);
+          void invoke("enter_capture_mode").catch(() => undefined);
         }
       },
     ).then((fn) => {
