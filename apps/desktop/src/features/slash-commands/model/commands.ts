@@ -6,8 +6,10 @@
  * Parser-acting commands (`kind: "parse-modifier"`) take their `name` from the
  * parser package so the literal lives in exactly one place and the parser + UI
  * can't drift, and insert as `/name `. Action commands (`kind: "action"`) aren't
- * parser keywords — selecting one inserts its `template` scaffold instead (e.g.
- * `/recur` types `every ` to start a natural-language recurrence).
+ * parser keywords — selecting one either inserts its `template` scaffold (e.g.
+ * `/recur` types `every `) or is intercepted by the capture page to *do*
+ * something: `/link` opens the anchor picker, and the navigation commands
+ * (`/list`, `/chain`, `/settings`, `/ai`) switch popup mode instead of typing.
  */
 
 import { COUNTDOWN_COMMAND_NAME } from "@linodea/parser";
@@ -54,6 +56,24 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: "ai",
     kind: "action",
     strings: (s) => s.slash.ai,
+  },
+  // Navigation commands — the capture page intercepts these by name and switches
+  // popup mode (same targets as the ••• menu), so a power user never has to reach
+  // for the mouse. They insert no text.
+  {
+    name: "list",
+    kind: "action",
+    strings: (s) => s.slash.list,
+  },
+  {
+    name: "chain",
+    kind: "action",
+    strings: (s) => s.slash.chain,
+  },
+  {
+    name: "settings",
+    kind: "action",
+    strings: (s) => s.slash.settings,
   },
 ];
 

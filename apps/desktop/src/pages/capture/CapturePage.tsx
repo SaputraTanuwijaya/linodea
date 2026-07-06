@@ -69,6 +69,15 @@ const SLASH_COMMAND_ROW_HEIGHT = 58;
 const ANCHOR_PICKER_ROW_HEIGHT = 40;
 const MAX_VISIBLE_ANCHORS = 5;
 
+/** Slash commands that switch popup mode instead of inserting text — same
+ * targets as the ••• menu, reached from the keyboard. Keyed by command name. */
+const NAV_COMMANDS: Record<string, string> = {
+  ai: "enter_ai_settings_mode",
+  list: "enter_list_mode",
+  chain: "enter_chain_mode",
+  settings: "enter_settings_mode",
+};
+
 export function CapturePage({
   aiAssist,
   inputRef,
@@ -211,6 +220,14 @@ export function CapturePage({
     }).catch(() => undefined);
   }, [expandedCaptureHeight, menuOpen, shouldHideAfterSave]);
 
+  // Re-enable the capture height effect once we're back in capture mode after a
+  // nav command suppressed it. `/list` and `/chain` keep the capture bar mounted
+  // (so the guard would otherwise stay set); `/ai` and `/settings` unmount it and
+  // reset via remount, where this is a harmless no-op.
+  useEffect(() => {
+    if (shouldHideAfterSave) isLeavingCapture.current = false;
+  }, [shouldHideAfterSave]);
+
   function syncCaret(el: HTMLInputElement) {
     setCaret(el.selectionStart ?? el.value.length);
   }
@@ -241,26 +258,33 @@ export function CapturePage({
     });
   }
 
-  /** A command was chosen from the dropdown. `/link` opens the anchor picker
-   *  instead of inserting text; every other command inserts as before. */
+  /** A command was chosen from the dropdown. `/link` opens the anchor picker,
+   *  the navigation commands switch popup mode, and everything else inserts
+   *  text as before. */
   function chooseCommand(suggestion: SlashCommandSuggestion) {
     if (suggestion.command.name === "link") {
       void enterAnchorMode();
       return;
     }
-    if (suggestion.command.name === "ai") {
-      if (isTauriRuntime()) {
-        // Settings now owns the native window size. Do not clear the slash
-        // token first: that would close the menu and queue a stale 130px
-        // capture resize which can race the 660px settings resize.
-        isLeavingCapture.current = true;
-        void invoke("enter_ai_settings_mode").catch(() => {
-          isLeavingCapture.current = false;
-        });
-      }
+    const navCommand = NAV_COMMANDS[suggestion.command.name];
+    if (navCommand) {
+      leaveCaptureFor(navCommand);
       return;
     }
     applySlash(slash.applyCommand(suggestion));
+  }
+
+  /** Leave the capture bar for another popup mode via a slash command. Suppress
+   *  the capture height effect first (`isLeavingCapture`) so clearing the input
+   *  can't queue a stray 130px resize that races the target mode's resize. */
+  function leaveCaptureFor(enterCommand: string) {
+    if (!isTauriRuntime()) return;
+    isLeavingCapture.current = true;
+    setInput("");
+    setCaret(0);
+    void invoke(enterCommand).catch(() => {
+      isLeavingCapture.current = false;
+    });
   }
 
   async function enterAnchorMode() {

@@ -173,6 +173,9 @@ export interface Strings {
     recur: { label: string; description: string };
     link: { label: string; description: string };
     ai: { label: string; description: string };
+    list: { label: string; description: string };
+    chain: { label: string; description: string };
+    settings: { label: string; description: string };
   };
   /** /link anchor picker (phase 2 of the dropdown) + the bound-anchor chip. */
   link: {
@@ -379,6 +382,18 @@ const STRINGS: Record<LanguageId, Strings> = {
         label: "/ai",
         description: "Open AI Assist setup, API key, and model selection.",
       },
+      list: {
+        label: "/list",
+        description: "Open the reminders list.",
+      },
+      chain: {
+        label: "/chain",
+        description: "Open the chain view of linked reminders.",
+      },
+      settings: {
+        label: "/settings",
+        description: "Open Settings (theme, language, prealerts, startup).",
+      },
     },
     link: {
       pickHeader: "Link to which reminder?",
@@ -576,6 +591,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       ai: {
         label: "/ai",
         description: "Buka setup Bantuan AI, kunci API, dan pilihan model.",
+      },
+      list: {
+        label: "/list",
+        description: "Buka daftar pengingat.",
+      },
+      chain: {
+        label: "/chain",
+        description: "Buka tampilan rantai pengingat yang tertaut.",
+      },
+      settings: {
+        label: "/settings",
+        description: "Buka Pengaturan (tema, bahasa, prealert, startup).",
       },
     },
     link: {
