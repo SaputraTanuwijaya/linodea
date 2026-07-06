@@ -8,8 +8,12 @@
  * shared/i18n and feature model files. (Both directions are valid: this
  * file is one layer up, so importing from `features/*` is allowed.)
  *
- * Dedupe lives in localStorage keyed per-reminder, per-stage. The legacy
- * v1 store (array of "fired due" ids) is migrated on first read.
+ * Dedupe is stored in SQLite (the `reminder_fire_state` table), keyed
+ * per-reminder, per-stage. It lived in WebView2 localStorage until S64 — moved
+ * so a cleared webview cache can't lose dedupe and re-fire historically-due
+ * prealerts. Any records left in the old localStorage keys are migrated into
+ * SQLite once, on the first pass of a session (`migrateLocalFireStoreOnce`),
+ * which also absorbs the even older v1 store (array of "fired due" ids).
  */
 
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
@@ -21,8 +25,12 @@ import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
 
 import {
   advanceReminderRecurrence,
+  clearReminderFireRecordCommand,
+  getReminderFireRecords,
   listReminderNodes,
+  setReminderFireRecord,
   updateReminderNodeStatus,
+  type FireRecord,
 } from "../api/commands";
 import { isActionable } from "../model/reminder";
 
@@ -40,9 +48,9 @@ function showAlert(payload: AlertPayload): void {
   void invoke("show_alert", { payload }).catch(() => undefined);
 }
 
+// Legacy localStorage keys, kept only for the one-time migration into SQLite.
 const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
 const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
-const MAX_STORED_REMINDER_RECORDS = 500;
 const MS_PER_MINUTE = 60_000;
 /**
  * Grace window for the "missed while the app was off" rule. While the app runs,
@@ -77,11 +85,7 @@ export interface DueNotificationResult {
   nextFireMs?: number;
 }
 
-interface FireRecord {
-  due?: true;
-  prealerts?: number[];
-}
-
+/** In-memory snapshot of the fire-dedupe store for one scheduler pass. */
 type FireStore = Record<string, FireRecord>;
 
 export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
@@ -115,7 +119,12 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const reminders = await listReminderNodes();
   const actionable = reminders.filter(isActionable);
   const sortedOffsets = sortDescending(getStoredPrealerts().offsets);
-  const store = readFireStore();
+  // Read once (IPC is proven up — listReminderNodes just succeeded). Mutations
+  // this pass are collected and flushed after the walk, keyed per reminder, so
+  // one failing write can't abort the rest of the pass.
+  const store = await readFireStore();
+  const changed = new Map<string, FireRecord>();
+  const removed = new Set<string>();
   const now = Date.now();
   let sentCount = 0;
   let autoDoneCount = 0;
@@ -178,6 +187,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
         whenMs: fireMs,
       });
       record.prealerts = [...(record.prealerts ?? []), offset.minutes];
+      changed.set(reminder.id, record);
       sentCount += 1;
     }
 
@@ -217,7 +227,8 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
             });
             // Forget this cycle's fire record so the next occurrence re-fires
             // its prealerts + due, and arm the precise timer for it now.
-            delete store[reminder.id];
+            removed.add(reminder.id);
+            changed.delete(reminder.id);
             const nextMs = new Date(nextIso).getTime();
             if (Number.isFinite(nextMs)) nextFireMs = Math.min(nextFireMs, nextMs);
             continue;
@@ -226,9 +237,11 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
             // Mark `due` so we don't spam; it stays pending in SQLite and a
             // later pass can recover.
             record.due = true;
+            changed.set(reminder.id, record);
           }
         } else {
           record.due = true;
+          changed.set(reminder.id, record);
           try {
             await updateReminderNodeStatus({
               id: reminder.id,
@@ -251,11 +264,18 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
         nextFireMs = Math.min(nextFireMs, dueMs);
       }
     }
-
-    store[reminder.id] = record;
   }
 
-  writeFireStore(store);
+  // Flush the pass's dedupe changes to SQLite. Rare in practice — only reminders
+  // that actually fired this pass. Swallow per-write failures: a dropped write
+  // just re-fires next pass, matching the pre-S64 best-effort localStorage write.
+  for (const id of removed) {
+    await clearReminderFireRecordCommand(id).catch(() => undefined);
+  }
+  for (const [id, record] of changed) {
+    await setReminderFireRecord(id, record).catch(() => undefined);
+  }
+
   return {
     sentCount,
     autoDoneCount,
@@ -281,18 +301,57 @@ function effectiveDueMs(reminder: ReminderNode): number {
 
 /**
  * Forget a reminder's fire record so it can fire again. Used when a reminder is
- * snoozed after it already fired (its `due`/prealert dedupe would otherwise
- * block the re-fire at the new time). Safe to call for never-fired reminders.
+ * snoozed or edited after it already fired (its `due`/prealert dedupe would
+ * otherwise block the re-fire at the new time). Safe to call for never-fired
+ * reminders (the DELETE is a no-op) and best-effort (swallows IPC errors).
  */
-export function clearReminderFireRecord(id: string): void {
-  const store = readFireStore();
-  if (store[id]) {
-    delete store[id];
-    writeFireStore(store);
+export async function clearReminderFireRecord(id: string): Promise<void> {
+  await clearReminderFireRecordCommand(id).catch(() => undefined);
+}
+
+/** Set once the one-time localStorage→SQLite migration has run this session. */
+let localFireStoreMigrated = false;
+
+/** Read the fire-dedupe store from SQLite, migrating any legacy localStorage
+ * records into it first. Returns an empty store if the read fails. */
+async function readFireStore(): Promise<FireStore> {
+  await migrateLocalFireStoreOnce();
+  try {
+    return await getReminderFireRecords();
+  } catch {
+    // Read failed (transient IPC/DB issue). Treat as empty — a later pass, or
+    // the 15s backstop, retries. Callers only ever add records, never clobber.
+    return {};
   }
 }
 
-function readFireStore(): FireStore {
+/**
+ * One-time move of any pre-S64 fire records still sitting in WebView2
+ * localStorage into SQLite, then delete the old keys so it never runs again.
+ * Idempotent: a fresh/migrated install reads nothing and just flips the flag.
+ * If a write fails the flag stays false and localStorage is left intact, so a
+ * later pass retries. Runs only after `listReminderNodes` proved IPC is up.
+ */
+async function migrateLocalFireStoreOnce(): Promise<void> {
+  if (localFireStoreMigrated) return;
+  try {
+    for (const [id, record] of Object.entries(readLegacyLocalFireStore())) {
+      await setReminderFireRecord(id, record);
+    }
+    localStorage.removeItem(FIRES_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_DUE_IDS_KEY);
+    localFireStoreMigrated = true;
+  } catch {
+    // Leave the flag false and localStorage intact; retry on a later pass.
+  }
+}
+
+/**
+ * Parse any pre-S64 fire records out of localStorage: the v2 object store, or
+ * the even older v1 array of "fired due" ids. Read-only — the caller removes
+ * the keys after a successful SQLite import.
+ */
+function readLegacyLocalFireStore(): FireStore {
   try {
     const raw = localStorage.getItem(FIRES_STORAGE_KEY);
     if (raw) {
@@ -301,7 +360,6 @@ function readFireStore(): FireStore {
         return parsed as FireStore;
       }
     }
-    // Migrate legacy v1 (array of reminder ids that fired T-due).
     const legacy = localStorage.getItem(LEGACY_DUE_IDS_KEY);
     if (legacy) {
       const ids: unknown = JSON.parse(legacy);
@@ -312,22 +370,11 @@ function readFireStore(): FireStore {
             migrated[id] = { due: true };
           }
         }
-        localStorage.setItem(FIRES_STORAGE_KEY, JSON.stringify(migrated));
-        localStorage.removeItem(LEGACY_DUE_IDS_KEY);
         return migrated;
       }
     }
   } catch {
-    // Ignore parse failures; fall through to empty store.
+    // Ignore parse failures — nothing to migrate.
   }
   return {};
-}
-
-function writeFireStore(store: FireStore) {
-  const entries = Object.entries(store);
-  const pruned =
-    entries.length > MAX_STORED_REMINDER_RECORDS
-      ? entries.slice(-MAX_STORED_REMINDER_RECORDS)
-      : entries;
-  localStorage.setItem(FIRES_STORAGE_KEY, JSON.stringify(Object.fromEntries(pruned)));
 }

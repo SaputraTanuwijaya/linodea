@@ -13,8 +13,12 @@
  * a time and advance on dismiss / Done / Snooze, hiding the window only once
  * the queue drains.
  *
- * Buttons reuse the existing reminder status command; Snooze also clears the
- * fire-dedupe record so a since-fired reminder re-fires at the new time.
+ * Actions depend on `kind`. A DUE fire is the real notification, so it offers
+ * Done + Snooze (reusing the reminder status command; Snooze also clears the
+ * fire-dedupe record so the reminder re-fires at the new time). A PREALERT is
+ * only a heads-up — it must not move or complete the real reminder — so it
+ * offers a single Dismiss that just closes the card (same effect as the 8s
+ * auto-dismiss). The reminder still fires at its actual due time.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -75,6 +79,12 @@ export function AlertPage() {
     setQueue((q) => q.slice(1));
   }
 
+  // Prealerts are informational: dismissing just closes the card, leaving the
+  // reminder's status/schedule untouched so it still fires at its due time.
+  function handleDismiss() {
+    advance();
+  }
+
   function handleDone() {
     if (!current) return;
     const at = new Date().toISOString();
@@ -89,7 +99,7 @@ export function AlertPage() {
 
   function handleSnooze() {
     if (!current) return;
-    clearReminderFireRecord(current.reminderId);
+    void clearReminderFireRecord(current.reminderId);
     void updateReminderNodeStatus({
       id: current.reminderId,
       status: "snoozed",
@@ -124,20 +134,33 @@ export function AlertPage() {
               +{queue.length - 1}
             </span>
           ) : null}
-          <button
-            className="h-7 rounded-md border border-[var(--lin-border)] px-2.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
-            onClick={handleSnooze}
-            type="button"
-          >
-            {strings.list.snooze}
-          </button>
-          <button
-            className="h-7 rounded-md border border-[var(--lin-border)] px-2.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
-            onClick={handleDone}
-            type="button"
-          >
-            {strings.list.done}
-          </button>
+          {current.kind === "prealert" ? (
+            // A prealert is a heads-up — a single Dismiss that touches nothing.
+            <button
+              className="h-7 rounded-md border border-[var(--lin-border)] px-2.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+              onClick={handleDismiss}
+              type="button"
+            >
+              {strings.list.dismiss}
+            </button>
+          ) : (
+            <>
+              <button
+                className="h-7 rounded-md border border-[var(--lin-border)] px-2.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+                onClick={handleSnooze}
+                type="button"
+              >
+                {strings.list.snooze}
+              </button>
+              <button
+                className="h-7 rounded-md border border-[var(--lin-border)] px-2.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+                onClick={handleDone}
+                type="button"
+              >
+                {strings.list.done}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </main>

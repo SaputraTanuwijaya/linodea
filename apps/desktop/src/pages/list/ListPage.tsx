@@ -122,8 +122,9 @@ export function ListPage({
   }
 
   function handleSnooze(reminder: ReminderNode, snoozedUntil: string) {
-    // Clear the fire dedupe so an already-fired reminder re-fires at the new time.
-    clearReminderFireRecord(reminder.id);
+    // Clear the fire dedupe so an already-fired reminder re-fires at the new
+    // time. Fire-and-forget: it only needs to land before the new snoozedUntil.
+    void clearReminderFireRecord(reminder.id);
     void runMutation(reminder.id, () =>
       updateReminderNodeStatus({
         id: reminder.id,
@@ -158,7 +159,7 @@ export function ListPage({
       // Editing re-specifies the reminder, so revive it: a missed/snoozed one
       // returns to `pending` (the edit command deliberately doesn't touch
       // status), and clearing the fire record lets it fire fresh at the new time.
-      clearReminderFireRecord(reminder.id);
+      await clearReminderFireRecord(reminder.id);
       if (reminder.status !== "pending") {
         await updateReminderNodeStatus({
           id: reminder.id,

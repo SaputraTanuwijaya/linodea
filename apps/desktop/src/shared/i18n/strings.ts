@@ -64,6 +64,7 @@ export interface Strings {
     empty: string;
     done: string;
     snooze: string;
+    dismiss: string;
     edit: string;
     delete: string;
     save: string;
@@ -241,6 +242,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       empty: "No reminders queued.",
       done: "Done",
       snooze: "Snooze",
+      dismiss: "Dismiss",
       edit: "Edit",
       delete: "Delete",
       save: "Save",
@@ -438,6 +440,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       empty: "Belum ada pengingat.",
       done: "Selesai",
       snooze: "Tunda",
+      dismiss: "Tutup",
       edit: "Ubah",
       delete: "Hapus",
       save: "Simpan",

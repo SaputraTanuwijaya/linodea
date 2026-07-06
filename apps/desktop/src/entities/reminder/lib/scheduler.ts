@@ -48,9 +48,9 @@ export function startReminderNotificationScheduler(): ReminderNotificationSchedu
   let nextTimer: number | undefined;
   let backstop: number | undefined;
   let stopped = false;
-  // Serialize passes: notifyDueReminders reads+writes one localStorage store,
-  // and sync() can be triggered concurrently (timer, backstop, focus, save).
-  // Overlapping passes could double-fire or drop dedupe writes.
+  // Serialize passes: notifyDueReminders reads+writes the SQLite fire-dedupe
+  // store, and sync() can be triggered concurrently (timer, backstop, focus,
+  // save). Overlapping passes could double-fire or drop dedupe writes.
   let running = false;
   let rerunRequested = false;
 

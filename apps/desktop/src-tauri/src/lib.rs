@@ -6,9 +6,10 @@ mod shortcut;
 use std::sync::Mutex;
 
 use data::{
-    AdvanceRecurrencePatch, ChainNode, MovePatch, ReminderCategoryPatch, ReminderEditPatch,
-    ReminderNode, ReminderStatusPatch, ReminderStore,
+    AdvanceRecurrencePatch, ChainNode, FireRecord, MovePatch, ReminderCategoryPatch,
+    ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore,
 };
+use std::collections::HashMap;
 use tauri::{LogicalSize, Manager};
 
 struct AppState {
@@ -172,6 +173,45 @@ fn advance_reminder_recurrence(
         .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
 
     store.advance_reminder_recurrence(patch)
+}
+
+#[tauri::command]
+fn get_reminder_fire_records(
+    state: tauri::State<'_, AppState>,
+) -> Result<HashMap<String, FireRecord>, String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.get_fire_records()
+}
+
+#[tauri::command]
+fn set_reminder_fire_record(
+    state: tauri::State<'_, AppState>,
+    reminder_id: String,
+    record: FireRecord,
+) -> Result<(), String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.set_fire_record(reminder_id, record)
+}
+
+#[tauri::command]
+fn clear_reminder_fire_record(
+    state: tauri::State<'_, AppState>,
+    reminder_id: String,
+) -> Result<(), String> {
+    let store = state
+        .reminders
+        .lock()
+        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
+
+    store.clear_fire_record(&reminder_id)
 }
 
 #[tauri::command]
@@ -344,6 +384,9 @@ pub fn run() {
             set_reminder_node_category,
             delete_reminder_node,
             advance_reminder_recurrence,
+            get_reminder_fire_records,
+            set_reminder_fire_record,
+            clear_reminder_fire_record,
             get_local_database_path,
             get_local_schema_version,
             get_ai_assist_status,

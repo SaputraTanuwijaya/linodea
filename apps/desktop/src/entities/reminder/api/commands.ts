@@ -108,3 +108,33 @@ export interface ReminderCategoryPatch {
 export function setReminderCategory(patch: ReminderCategoryPatch): Promise<ReminderNode> {
   return invoke<ReminderNode>("set_reminder_node_category", { patch });
 }
+
+/**
+ * Per-reminder scheduler dedupe record: `due` = the T-due alert already fired,
+ * `prealerts` = the minute-offsets whose prealert already fired. Persisted in
+ * SQLite (not localStorage) so a cleared webview cache can't lose dedupe and
+ * re-fire historically-due alerts. Fields are optional on the wire — a missing
+ * one means "not fired".
+ */
+export interface FireRecord {
+  due?: boolean;
+  prealerts?: number[];
+}
+
+/** The whole fire-dedupe store as a `reminderId -> FireRecord` map. */
+export function getReminderFireRecords(): Promise<Record<string, FireRecord>> {
+  return invoke<Record<string, FireRecord>>("get_reminder_fire_records");
+}
+
+/** Upsert one reminder's fire record (called when an alert fires). */
+export function setReminderFireRecord(
+  reminderId: string,
+  record: FireRecord,
+): Promise<void> {
+  return invoke<void>("set_reminder_fire_record", { reminderId, record });
+}
+
+/** Forget one reminder's fire record so it can fire again (snooze/edit/recur). */
+export function clearReminderFireRecordCommand(reminderId: string): Promise<void> {
+  return invoke<void>("clear_reminder_fire_record", { reminderId });
+}

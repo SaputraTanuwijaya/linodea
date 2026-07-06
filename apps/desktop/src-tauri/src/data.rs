@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -58,6 +58,13 @@ CREATE INDEX IF NOT EXISTS idx_reminder_nodes_status_scheduled_at
 
 CREATE INDEX IF NOT EXISTS idx_reminder_nodes_parent_id
   ON reminder_nodes (parent_id);
+
+CREATE TABLE IF NOT EXISTS reminder_fire_state (
+  reminder_id TEXT PRIMARY KEY,
+  due_fired INTEGER NOT NULL DEFAULT 0,
+  fired_prealerts_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL
+);
 "#;
 
 /// Repeat rule for a recurring reminder, stored as JSON in `recurrence_json`.
@@ -168,6 +175,24 @@ pub struct ReminderCategoryPatch {
     pub id: String,
     pub category: String,
     pub updated_at: String,
+}
+
+/// Per-reminder scheduler dedupe: which alerts have already fired for a
+/// reminder. `due` = the T-due alert fired; `prealerts` = the minute-offsets
+/// whose prealert fired. Kept deliberately OUT of `reminder_nodes` — this is
+/// local-device scheduler bookkeeping, not user reminder data, so it never
+/// syncs to a Phase-2 phone and can be cleared independently (snooze / edit
+/// re-fire). Lived in WebView2 localStorage until S64; moved here so a cleared
+/// webview cache can no longer lose dedupe and re-fire historically-due
+/// prealerts. Missing fields deserialize to `false` / `[]`, so a partial record
+/// from the localStorage migration round-trips cleanly.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FireRecord {
+    #[serde(default)]
+    pub due: bool,
+    #[serde(default)]
+    pub prealerts: Vec<i64>,
 }
 
 /// A node plus its ordered children, recursively. The assembled shape the
@@ -655,6 +680,85 @@ impl ReminderStore {
             .ok_or_else(|| "Reminder was moved but could not be read back.".to_string())
     }
 
+    /// Read the whole fire-dedupe store as a `reminder_id -> FireRecord` map.
+    /// The JS scheduler snapshots this once per pass to decide what still needs
+    /// to fire.
+    pub fn get_fire_records(&self) -> Result<HashMap<String, FireRecord>, String> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT reminder_id, due_fired, fired_prealerts_json FROM reminder_fire_state")
+            .map_err(to_store_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(to_store_error)?;
+
+        let mut records = HashMap::new();
+        for row in rows {
+            let (id, due, prealerts_json) = row.map_err(to_store_error)?;
+            let prealerts = serde_json::from_str(&prealerts_json).unwrap_or_default();
+            records.insert(
+                id,
+                FireRecord {
+                    due: due != 0,
+                    prealerts,
+                },
+            );
+        }
+        Ok(records)
+    }
+
+    /// Upsert one reminder's fire record. Called when a prealert or the T-due
+    /// alert fires. `updated_at` is stamped server-side (pure local bookkeeping,
+    /// no need to match the reminder's own timestamps).
+    pub fn set_fire_record(&self, reminder_id: String, record: FireRecord) -> Result<(), String> {
+        if reminder_id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+        let prealerts_json = serde_json::to_string(&record.prealerts).map_err(to_store_error)?;
+        let updated_at = now_iso(&self.connection)?;
+        self.connection
+            .execute(
+                r#"
+                INSERT INTO reminder_fire_state (reminder_id, due_fired, fired_prealerts_json, updated_at)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(reminder_id) DO UPDATE SET
+                  due_fired = excluded.due_fired,
+                  fired_prealerts_json = excluded.fired_prealerts_json,
+                  updated_at = excluded.updated_at
+                "#,
+                params![
+                    reminder_id,
+                    i64::from(record.due),
+                    prealerts_json,
+                    updated_at
+                ],
+            )
+            .map_err(to_store_error)?;
+        Ok(())
+    }
+
+    /// Forget one reminder's fire record so it can fire again — used when a
+    /// snooze/edit reschedules an already-fired reminder, and when a recurring
+    /// reminder advances to its next occurrence. A no-op if no record exists.
+    pub fn clear_fire_record(&self, reminder_id: &str) -> Result<(), String> {
+        if reminder_id.trim().is_empty() {
+            return Err("Reminder id is required.".to_string());
+        }
+        self.connection
+            .execute(
+                "DELETE FROM reminder_fire_state WHERE reminder_id = ?1",
+                params![reminder_id],
+            )
+            .map_err(to_store_error)?;
+        Ok(())
+    }
+
     /// Assemble every node into its nested chain forest. Defensive against
     /// inconsistent data: a parent pointing at a missing node surfaces the
     /// child at root, and broken or cyclic previous/next links can neither
@@ -716,6 +820,15 @@ impl ReminderStore {
             return Err("Reminder was not found.".to_string());
         }
 
+        // Drop the reminder's scheduler fire record too, so deleted reminders
+        // don't leave orphan dedupe rows behind (delete is the only path that
+        // removes a reminder row).
+        tx.execute(
+            "DELETE FROM reminder_fire_state WHERE reminder_id = ?1",
+            params![id],
+        )
+        .map_err(to_store_error)?;
+
         tx.commit().map_err(to_store_error)?;
         Ok(())
     }
@@ -757,7 +870,16 @@ impl ReminderStore {
         self.connection
             .execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![CURRENT_SCHEMA_VERSION, "add_recurrence"],
+                params![2, "add_recurrence"],
+            )
+            .map_err(to_store_error)?;
+        // v3: the `reminder_fire_state` table is created by the base SCHEMA above
+        // (idempotent `CREATE TABLE IF NOT EXISTS`), so existing DBs pick it up on
+        // the next open — only the migration marker is recorded here.
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                params![CURRENT_SCHEMA_VERSION, "add_reminder_fire_state"],
             )
             .map_err(to_store_error)?;
 
@@ -1555,12 +1677,81 @@ mod tests {
         assert!(store
             .column_exists("reminder_nodes", "recurrence_json")
             .expect("checks column"));
-        assert_eq!(store.schema_version().expect("version"), 2);
+        assert_eq!(
+            store.schema_version().expect("version"),
+            CURRENT_SCHEMA_VERSION
+        );
+        // v3 adds the fire-state table; a migrated v1 DB gets it too, and its
+        // fire store starts empty.
+        assert!(store
+            .get_fire_records()
+            .expect("fire records read")
+            .is_empty());
 
         let reminders = store.list_reminders().expect("legacy row still loads");
         assert_eq!(reminders.len(), 1);
         assert_eq!(reminders[0].id, "legacy-1");
         assert!(reminders[0].recurrence.is_none());
+    }
+
+    #[test]
+    fn upserts_reads_and_clears_fire_records() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+
+        // Empty to start.
+        assert!(store.get_fire_records().expect("read").is_empty());
+
+        // Insert a prealert-only record, then upsert it to add the due flag.
+        store
+            .set_fire_record(
+                "r1".to_string(),
+                FireRecord {
+                    due: false,
+                    prealerts: vec![1440, 60],
+                },
+            )
+            .expect("set prealerts");
+        store
+            .set_fire_record(
+                "r1".to_string(),
+                FireRecord {
+                    due: true,
+                    prealerts: vec![1440, 60],
+                },
+            )
+            .expect("upsert due");
+
+        let records = store.get_fire_records().expect("read");
+        assert_eq!(records.len(), 1);
+        let record = &records["r1"];
+        assert!(record.due);
+        assert_eq!(record.prealerts, vec![1440, 60]);
+
+        // Clearing removes it; clearing again is a harmless no-op.
+        store.clear_fire_record("r1").expect("clear");
+        assert!(store.get_fire_records().expect("read").is_empty());
+        store.clear_fire_record("r1").expect("clear no-op");
+    }
+
+    #[test]
+    fn deleting_a_reminder_drops_its_fire_record() {
+        let store = ReminderStore::open_in_memory().expect("store opens");
+        store
+            .create_reminder(sample_reminder("r1"))
+            .expect("reminder is created");
+        store
+            .set_fire_record(
+                "r1".to_string(),
+                FireRecord {
+                    due: true,
+                    prealerts: vec![],
+                },
+            )
+            .expect("set");
+
+        store.delete_reminder("r1").expect("reminder is deleted");
+
+        assert!(store.get_fire_records().expect("read").is_empty());
     }
 
     const MOVE_STAMP: &str = "2026-05-22T13:00:00.000Z";
