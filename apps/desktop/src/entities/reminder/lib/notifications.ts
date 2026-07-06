@@ -53,15 +53,23 @@ const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
 const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
 const MS_PER_MINUTE = 60_000;
 /**
- * Grace window for the "missed while the app was off" rule. While the app runs,
- * the precise timer / 15s backstop fires a reminder within ~15s of its due time.
- * So a non-recurring reminder that is still unfired and more than this far past
- * due means the app almost certainly wasn't running when it came due — mark it
- * `missed` (persistent, surfaced in the list) instead of firing a stale alert
- * and auto-doning it, which would "silently" complete it if the user wasn't
- * looking. Reminders due within the grace are treated as a normal on-time fire.
+ * Boundary between a *late-fire* and a *missed* reminder — the OS-sleep / app-off
+ * catch-up policy.
+ *
+ * While the app runs, the precise timer / 15s backstop fires within ~15s of due,
+ * so being overdue at all means we weren't watching when it came due (the app
+ * was quit, or the machine was asleep so timers didn't tick). Two bands:
+ *   - overdue by ≤ this window → *late-fire*: pop the alert now and auto-done as
+ *     usual. The user just came back (relaunch / wake), so a slightly-late alert
+ *     is still useful, not a silent completion. 15s ≪ this window, so a running
+ *     app's on-time fires are never near the boundary.
+ *   - overdue by > this window → `missed`: too stale to ambush the user with a
+ *     surprise alert, so surface it (persistent, in the list) instead of firing.
+ *
+ * The window also bounds a wake burst: after a long sleep only the last few
+ * minutes' worth of reminders late-fire; everything older is quietly `missed`.
  */
-const MISSED_GRACE_MS = 60_000;
+const LATE_FIRE_WINDOW_MS = 5 * MS_PER_MINUTE;
 
 export type NotificationPermissionState = "unknown" | "granted" | "denied";
 
@@ -147,10 +155,12 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
       continue;
     }
 
-    // Came due while the app was off (well past due, never fired): mark it
-    // `missed` instead of firing a stale alert and auto-doning it. Recurring
+    // Came due while we weren't watching AND is now too stale to surprise-fire
+    // (more than the late-fire window past due, never fired): mark it `missed`
+    // instead of firing a stale alert and auto-doning it. Reminders overdue by
+    // less than the window fall through and *late-fire* below. Recurring
     // reminders are left to roll forward on their own (existing fire+advance).
-    if (!record.due && !reminder.recurrence && dueMs <= now - MISSED_GRACE_MS) {
+    if (!record.due && !reminder.recurrence && dueMs <= now - LATE_FIRE_WINDOW_MS) {
       try {
         await updateReminderNodeStatus({
           id: reminder.id,
@@ -166,29 +176,36 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     }
 
     // Prealerts -------------------------------------------------------
-    for (const offset of sortedOffsets) {
-      const fireMs = dueMs - offset.minutes * MS_PER_MINUTE;
-      // Skip prealerts whose fire-time is already past T-due (offset 0),
-      // that would have fired before the reminder existed, or already fired.
-      if (fireMs >= dueMs) continue;
-      if (Number.isFinite(createdMs) && fireMs < createdMs) continue;
-      if (record.prealerts?.includes(offset.minutes)) continue;
-      // Not yet time — record it as a candidate for the next precise wake.
-      if (fireMs > now) {
-        nextFireMs = Math.min(nextFireMs, fireMs);
-        continue;
-      }
+    // Only while the reminder is still upcoming: a prealert is a "get ready"
+    // lead-up, so once the reminder is due/overdue its prealerts are obsolete —
+    // the T-due handling below (late-fire or `missed`) takes over. This also
+    // stops a wake burst from popping a pile of stale prealerts for reminders
+    // whose due already passed during the sleep.
+    if (dueMs > now) {
+      for (const offset of sortedOffsets) {
+        const fireMs = dueMs - offset.minutes * MS_PER_MINUTE;
+        // Skip prealerts whose fire-time is already past T-due (offset 0),
+        // that would have fired before the reminder existed, or already fired.
+        if (fireMs >= dueMs) continue;
+        if (Number.isFinite(createdMs) && fireMs < createdMs) continue;
+        if (record.prealerts?.includes(offset.minutes)) continue;
+        // Not yet time — record it as a candidate for the next precise wake.
+        if (fireMs > now) {
+          nextFireMs = Math.min(nextFireMs, fireMs);
+          continue;
+        }
 
-      showAlert({
-        reminderId: reminder.id,
-        title: reminder.title,
-        kind: "prealert",
-        leadMinutes: offset.minutes,
-        whenMs: fireMs,
-      });
-      record.prealerts = [...(record.prealerts ?? []), offset.minutes];
-      changed.set(reminder.id, record);
-      sentCount += 1;
+        showAlert({
+          reminderId: reminder.id,
+          title: reminder.title,
+          kind: "prealert",
+          leadMinutes: offset.minutes,
+          whenMs: fireMs,
+        });
+        record.prealerts = [...(record.prealerts ?? []), offset.minutes];
+        changed.set(reminder.id, record);
+        sentCount += 1;
+      }
     }
 
     // T-due — fire, then either re-arm (recurring) or auto-done ------
