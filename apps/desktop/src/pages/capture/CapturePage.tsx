@@ -528,8 +528,12 @@ export function CapturePage({
   }
 
   return (
+    // z-20 lifts the capture bar (and its slash/anchor dropdowns) above the page
+    // body below. Both this bar and the list/chain sections use `backdrop-blur`,
+    // which creates a stacking context, so a dropdown's own z-index can't escape
+    // the bar — the bar's context must win. See the popup z-scale in app/App.tsx.
     <form
-      className="relative flex w-full items-center rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] py-3.5 pl-11 pr-11 shadow-2xl backdrop-blur transition-colors"
+      className="relative z-20 flex w-full items-center rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] py-3.5 pl-11 pr-11 shadow-2xl backdrop-blur transition-colors"
       onSubmit={handleSubmit}
     >
       <div className="relative flex min-w-0 flex-1 flex-col gap-1">

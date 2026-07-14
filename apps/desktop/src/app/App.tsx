@@ -332,6 +332,14 @@ function App() {
 
   // --- Render -------------------------------------------------------------
 
+  // Popup z-scale (all inside the single main window). The capture bar and each
+  // page body both use `backdrop-blur`, which creates a stacking context, so
+  // ordering can't be left to DOM order — later-rendered page bodies would cover
+  // the capture bar's dropdowns. Explicit layers, low → high:
+  //   page body (list/chain/settings)      base (implicit; its own bg + context)
+  //   capture bar + slash/anchor dropdowns z-20 (set on the form in CapturePage)
+  //   logo ribbon                          z-30 (decorative, sits over the bar)
+  //   floating menus (••• / context menu)  z-50 (fixed; top layer)
   return (
     <main className="flex h-screen w-screen items-start justify-center bg-transparent pt-3">
       <div className="relative w-[560px]" onContextMenu={handleContextMenu}>
@@ -339,7 +347,7 @@ function App() {
           <>
             <img
               alt=""
-              className="pointer-events-none absolute -left-5 -top-7 z-10 h-20 w-20 rotate-[8deg] select-none object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
+              className="pointer-events-none absolute -left-5 -top-7 z-30 h-20 w-20 rotate-[8deg] select-none object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
               draggable={false}
               src="/brand/logo.png"
             />
