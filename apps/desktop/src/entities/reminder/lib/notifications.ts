@@ -2,7 +2,8 @@
  * Reminder notification polling loop.
  *
  * Lives in the reminder entity because it composes reminder lifecycle
- * (auto-done at T-due) with notification dispatch. It reads two feature
+ * (fire dispatch + missed/recurrence transitions) with notification dispatch.
+ * A due reminder is NOT auto-completed — see the T-due branch. It reads two feature
  * configs (prealerts, language) but does not import from features/ —
  * instead it pulls from the underlying registries and storage helpers in
  * shared/i18n and feature model files. (Both directions are valid: this
@@ -75,7 +76,6 @@ export type NotificationPermissionState = "unknown" | "granted" | "denied";
 
 export interface DueNotificationResult {
   sentCount: number;
-  autoDoneCount: number;
   /** Reminders currently in the `missed` state (surfaced, awaiting the user). */
   missedCount: number;
   /**
@@ -115,8 +115,9 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
  *   - marks a non-recurring reminder `missed` if it came due while the app was
  *     off (well past due, never fired) — no stale alert, no auto-done,
  *   - fires any prealert whose window has been crossed and not yet fired,
- *   - fires the T-due toast (once) when due time has passed,
- *   - immediately auto-marks the reminder `done` after the T-due fire.
+ *   - fires the T-due toast (once) when due time has passed, leaving the
+ *     reminder `pending` (acknowledge-to-complete — done only on the user's
+ *     Done click; an unacknowledged fire stays pending + overdue, never `done`).
  */
 export async function notifyDueReminders(): Promise<DueNotificationResult> {
   // The custom Linodea alert window does not depend on OS notification
@@ -135,7 +136,6 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
   const removed = new Set<string>();
   const now = Date.now();
   let sentCount = 0;
-  let autoDoneCount = 0;
   let missedCount = 0;
   let newlyMissed = 0;
   let nextFireMs = Infinity;
@@ -257,24 +257,15 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
             changed.set(reminder.id, record);
           }
         } else {
+          // Acknowledge-to-complete: fire the alert but do NOT auto-mark the
+          // reminder done. A reminder must never silently complete while the
+          // user is away from the desk — it's marked done only when the user
+          // clicks Done (on the alert window or in the list). `record.due = true`
+          // blocks a re-fire, so an unacknowledged reminder just stays `pending`
+          // and overdue; the list tags past-due pending rows "Overdue" so a fire
+          // the user didn't catch stays visible instead of vanishing into `done`.
           record.due = true;
           changed.set(reminder.id, record);
-          try {
-            await updateReminderNodeStatus({
-              id: reminder.id,
-              status: "done",
-              updatedAt: nowIso,
-              completedAt: nowIso,
-            });
-            autoDoneCount += 1;
-          } catch {
-            // Mark-done failed (offline DB, etc.) but the toast already
-            // fired. Keep `record.due = true` so we never re-fire. The
-            // reminder will stay pending in SQLite; the next sync pass will
-            // attempt to mark-done again because we re-detect dueMs<=now
-            // but `record.due` blocks re-firing. (Cost: orphan pending row
-            // until manual cleanup or a future repair pass.)
-          }
         }
       } else {
         // Future due time — candidate for the next precise wake.
@@ -295,7 +286,6 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 
   return {
     sentCount,
-    autoDoneCount,
     missedCount,
     newlyMissed,
     permissionGranted,
@@ -306,7 +296,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 /**
  * The instant a reminder should actually fire. A snoozed reminder fires at its
  * `snoozedUntil`, not its original `scheduledAt`; everything else fires at
- * `scheduledAt`. Prealerts and the due/auto-done step both key off this.
+ * `scheduledAt`. Prealerts and the T-due fire both key off this.
  */
 function effectiveDueMs(reminder: ReminderNode): number {
   if (reminder.status === "snoozed" && reminder.snoozedUntil) {

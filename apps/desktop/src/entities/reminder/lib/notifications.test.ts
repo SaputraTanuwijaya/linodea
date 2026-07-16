@@ -1,19 +1,16 @@
 /**
- * Characterization tests for the reminder notification state machine
- * (`notifyDueReminders`). See the launch plan L0a.
+ * Tests for the reminder notification state machine (`notifyDueReminders`).
  *
- * These pin the CURRENT behavior of every branch — future / on-time-due /
- * late-fire / missed / already-missed / prealert-dedupe / recurring-advance /
- * snooze-timing — by driving the function over an in-memory world with a fake
- * clock. No `notifications.ts` refactor: the function already reads through
- * `listReminderNodes` / `getReminderFireRecords` and writes through the command
- * wrappers, so we mock those boundaries.
+ * Pins the behavior of every branch — future / on-time-due / late-fire /
+ * missed / already-missed / prealert-dedupe / recurring-advance / snooze-timing
+ * — by driving the function over an in-memory world with a fake clock. It reads
+ * through `listReminderNodes` / `getReminderFireRecords` and writes through the
+ * command wrappers, so we mock those boundaries.
  *
- * IMPORTANT: this is a *characterization* test of today's behavior, not a spec
- * of desired behavior. The auto-done-at-dispatch assertions (marked
- * `[L0b flips]`) capture the silent-completion trust hole; the L0b
- * acknowledge-to-complete slice will deliberately change them, and that change
- * should show up as an intentional diff in this file.
+ * Acknowledge-to-complete (L0b): a due reminder FIRES but is NOT auto-completed
+ * — it stays `pending` and is marked done only on the user's Done click. The
+ * tests assert no `done` write on dispatch for on-time / late / snoozed fires;
+ * an unacknowledged fire stays pending + overdue, never silently `done`.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -185,27 +182,27 @@ describe("notifyDueReminders", () => {
     expect(H.alerts).toHaveLength(0);
     expect(H.statusUpdates).toHaveLength(0);
     expect(result.sentCount).toBe(0);
-    expect(result.autoDoneCount).toBe(0);
     expect(result.missedCount).toBe(0);
     expect(result.nextFireMs).toBe(BASE_MS + 60 * MIN);
   });
 
-  it("fires an on-time due reminder AND auto-marks it done [L0b flips]", async () => {
+  it("fires an on-time due reminder but leaves it pending (acknowledge-to-complete)", async () => {
     const r = makeReminder({ scheduledAt: BASE_ISO });
     H.reminders = [r];
 
-    const result = await notifyDueReminders();
+    await notifyDueReminders();
 
     expect(dueAlerts()).toHaveLength(1);
     expect(dueAlerts()[0]).toMatchObject({ reminderId: r.id, kind: "due", whenMs: BASE_MS });
-    // [L0b flips] today the reminder is completed at dispatch, before any ack.
-    expect(doneUpdates()).toHaveLength(1);
-    expect(doneUpdates()[0]).toMatchObject({ id: r.id, status: "done", completedAt: BASE_ISO });
-    expect(result.autoDoneCount).toBe(1);
+    // No silent completion — done only on the user's Done click.
+    expect(doneUpdates()).toHaveLength(0);
+    expect(H.statusUpdates).toHaveLength(0);
+    expect(r.status).toBe("pending");
+    // Deduped so it won't re-fire, and `due` blocks a later `missed` re-mark.
     expect(H.fireStore[r.id]).toEqual({ due: true });
   });
 
-  it("late-fires a reminder overdue within the 5-min window (not missed) [L0b flips auto-done]", async () => {
+  it("late-fires a reminder overdue within the 5-min window, leaving it pending (not missed, not done)", async () => {
     const r = makeReminder({ scheduledAt: iso(-3 * MIN) });
     H.reminders = [r];
 
@@ -213,9 +210,10 @@ describe("notifyDueReminders", () => {
 
     expect(dueAlerts()).toHaveLength(1);
     expect(missedUpdates()).toHaveLength(0);
-    // [L0b flips] the auto-done half; the late *fire* itself stays.
-    expect(doneUpdates()).toHaveLength(1);
-    expect(result.autoDoneCount).toBe(1);
+    // Acknowledge-to-complete: the late fire still shows, but no auto-done.
+    expect(doneUpdates()).toHaveLength(0);
+    expect(r.status).toBe("pending");
+    expect(H.fireStore[r.id]).toEqual({ due: true });
     expect(result.missedCount).toBe(0);
     expect(result.newlyMissed).toBe(0);
   });
@@ -233,7 +231,6 @@ describe("notifyDueReminders", () => {
     expect(doneUpdates()).toHaveLength(0);
     expect(result.missedCount).toBe(1);
     expect(result.newlyMissed).toBe(1);
-    expect(result.autoDoneCount).toBe(0);
   });
 
   it("counts an already-missed reminder without re-alerting or re-writing it", async () => {
@@ -266,21 +263,20 @@ describe("notifyDueReminders", () => {
     expect(prealertAlerts()).toHaveLength(1); // no second prealert
   });
 
-  it("advances a recurring reminder instead of auto-doning it", async () => {
+  it("advances a recurring reminder instead of completing it", async () => {
     const r = makeReminder({
       scheduledAt: BASE_ISO,
       recurrence: { freq: "daily", interval: 1, count: 3 },
     });
     H.reminders = [r];
 
-    const result = await notifyDueReminders();
+    await notifyDueReminders();
 
     expect(dueAlerts()).toHaveLength(1);
     expect(H.advances).toHaveLength(1);
     expect(H.advances[0]).toMatchObject({ id: r.id, scheduledAt: H.recurNextIso });
     expect(H.advances[0].recurrence?.count).toBe(2); // decremented
     expect(doneUpdates()).toHaveLength(0);
-    expect(result.autoDoneCount).toBe(0);
     expect(H.fireStore[r.id]).toBeUndefined(); // fire record forgotten for next cycle
   });
 
@@ -293,12 +289,12 @@ describe("notifyDueReminders", () => {
     });
     H.reminders = [r];
 
-    const result = await notifyDueReminders();
+    await notifyDueReminders();
 
     expect(dueAlerts()).toHaveLength(1);
     expect(dueAlerts()[0].whenMs).toBe(BASE_MS);
     expect(missedUpdates()).toHaveLength(0);
-    expect(doneUpdates()).toHaveLength(1); // [L0b flips] auto-done half
-    expect(result.autoDoneCount).toBe(1);
+    expect(doneUpdates()).toHaveLength(0); // acknowledge-to-complete: no auto-done
+    expect(r.status).toBe("snoozed"); // unchanged; user acknowledges via the alert
   });
 });

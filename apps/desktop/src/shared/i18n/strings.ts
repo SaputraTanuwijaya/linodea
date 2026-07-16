@@ -59,6 +59,7 @@ export interface Strings {
     queued: string;
     pending: (count: number) => string;
     missed: string;
+    overdue: string;
     missedCount: (count: number) => string;
     loading: string;
     empty: string;
@@ -240,6 +241,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       queued: "Queued",
       pending: (count) => (count === 1 ? "1 pending" : `${count} pending`),
       missed: "Missed",
+      overdue: "Overdue",
       missedCount: (count) => (count === 1 ? "1 missed" : `${count} missed`),
       loading: "Loading...",
       empty: "No reminders queued.",
@@ -450,6 +452,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       queued: "Antrean",
       pending: (count) => (count === 1 ? "1 menunggu" : `${count} menunggu`),
       missed: "Terlewat",
+      overdue: "Terlambat",
       missedCount: (count) => (count === 1 ? "1 terlewat" : `${count} terlewat`),
       loading: "Memuat...",
       empty: "Belum ada pengingat.",

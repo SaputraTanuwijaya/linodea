@@ -176,6 +176,9 @@ export function ListPage({
   }
 
   const missedCount = reminders.filter((r) => r.status === "missed").length;
+  // Captured once per render (the list re-fetches on focus / mode / backstop
+  // sync, same cadence the `missed` tag relies on), used to tag past-due rows.
+  const now = Date.now();
 
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
@@ -281,6 +284,10 @@ export function ListPage({
                       <span className="flex-none rounded bg-[var(--lin-danger-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--lin-danger)]">
                         {strings.list.missed}
                       </span>
+                    ) : isOverdue(reminder, now) ? (
+                      <span className="flex-none rounded bg-[var(--lin-warning-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--lin-warning)]">
+                        {strings.list.overdue}
+                      </span>
                     ) : null}
                     <span className="truncate">
                       {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
@@ -320,6 +327,19 @@ export function ListPage({
       )}
     </section>
   );
+}
+
+/**
+ * A reminder past its (effective) fire time that's still awaiting the user —
+ * an unacknowledged fire (acknowledge-to-complete leaves it `pending`, never
+ * auto-`done`), or one about to fire. Distinct from `missed` (which is the
+ * app-was-off case); tagged "Overdue" so a fire the user didn't catch stays
+ * visible instead of blending in with upcoming reminders.
+ */
+function isOverdue(reminder: ReminderNode, now: number): boolean {
+  if (reminder.status === "missed") return false;
+  const due = new Date(reminder.snoozedUntil ?? reminder.scheduledAt).getTime();
+  return Number.isFinite(due) && due < now;
 }
 
 function RowButton({

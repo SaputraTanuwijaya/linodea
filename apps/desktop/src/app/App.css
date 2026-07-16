@@ -48,6 +48,8 @@ body,
      --lin-accent      : hover/active highlight
      --lin-danger      : destructive text (Quit)
      --lin-danger-bg   : destructive hover background
+     --lin-warning     : attention text (Overdue tag)
+     --lin-warning-bg  : attention tag background
    --------------------------------------------------------------- */
 
 :root,
@@ -64,6 +66,8 @@ body,
   --lin-accent: rgb(228 228 231);
   --lin-danger: rgb(252 165 165);
   --lin-danger-bg: rgb(136 19 55 / 0.3);
+  --lin-warning: rgb(251 191 36);
+  --lin-warning-bg: rgb(120 53 15 / 0.3);
 
   /* Category colors (chain view grouping + dots). Brighter on dark. The
      paid "custom category colors" cosmetic will override these per user. */
@@ -87,6 +91,8 @@ body,
   --lin-accent: rgb(39 39 42);
   --lin-danger: rgb(190 18 60);
   --lin-danger-bg: rgb(254 226 226);
+  --lin-warning: rgb(180 83 9);
+  --lin-warning-bg: rgb(254 243 199);
 
   /* Darker shades for contrast on the light surface. */
   --lin-cat-university: rgb(37 99 235);
