@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "pretypecheck": "npm run build -w @linodea/parser",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -32,6 +33,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "tailwindcss": "^4.1.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.0"
   }
 }
