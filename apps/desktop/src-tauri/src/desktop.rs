@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -186,7 +186,7 @@ fn boot_prompt_marker_path(app: &AppHandle) -> Option<PathBuf> {
 /// setup runs unthrottled, so the trigger is now deterministic.
 pub fn is_boot_prompt_answered(app: &AppHandle) -> bool {
     boot_prompt_marker_path(app)
-        .map(|path| path.exists())
+        .map(|path| marker_answered(&path))
         .unwrap_or(false)
 }
 
@@ -194,10 +194,49 @@ pub fn is_boot_prompt_answered(app: &AppHandle) -> bool {
 /// shown again. Best-effort: a write failure just means we may re-ask next launch.
 pub fn mark_boot_prompt_answered(app: &AppHandle) {
     if let Some(path) = boot_prompt_marker_path(app) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&path, b"1");
+        write_marker(&path);
+    }
+}
+
+/// The marker's persistence, split from the `AppHandle` path lookup so it can be
+/// unit-tested against a temp dir: presence of the file == answered.
+fn marker_answered(path: &Path) -> bool {
+    path.exists()
+}
+
+/// Write the answered-marker, creating its parent dir if missing. Best-effort
+/// (swallows IO errors) — a failed write just means the prompt may re-ask.
+fn write_marker(path: &Path) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, b"1");
+}
+
+/// What to do with the main window at startup. Boot (autostart) launches stay
+/// hidden; a manual launch surfaces the first-run prompt once, then the capture
+/// bar thereafter. See [`startup_action`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupAction {
+    /// Autostart/boot launch — stay hidden (start-minimized), surface nothing.
+    StayHidden,
+    /// Manual launch, prompt already answered — surface the capture bar.
+    ShowCapture,
+    /// Manual launch, first run — surface the launch-on-boot prompt (shown once).
+    ShowBootPrompt,
+}
+
+/// The startup-visibility policy, extracted from the Tauri `setup()` closure so
+/// it's explicit and unit-testable (the closure itself, wired to `AppHandle`,
+/// is not). A boot launch must never steal focus with a window; a manual launch
+/// must surface *something* so the user knows the app is running.
+pub fn startup_action(launched_on_boot: bool, boot_prompt_answered: bool) -> StartupAction {
+    if launched_on_boot {
+        StartupAction::StayHidden
+    } else if boot_prompt_answered {
+        StartupAction::ShowCapture
+    } else {
+        StartupAction::ShowBootPrompt
     }
 }
 
@@ -343,4 +382,73 @@ fn is_left_click_release(event: &TrayIconEvent) -> bool {
 fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     app.get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or(tauri::Error::WindowNotFound)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{marker_answered, startup_action, write_marker, StartupAction};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    // The install-time reliability contract, one assertion per input combo.
+
+    #[test]
+    fn boot_launch_stays_hidden_regardless_of_prompt_state() {
+        // Autostart handed us `--autostarted`: never surface a window on boot,
+        // whether or not the first-run prompt was ever answered.
+        assert_eq!(startup_action(true, true), StartupAction::StayHidden);
+        assert_eq!(startup_action(true, false), StartupAction::StayHidden);
+    }
+
+    #[test]
+    fn manual_launch_after_answering_shows_capture() {
+        assert_eq!(startup_action(false, true), StartupAction::ShowCapture);
+    }
+
+    #[test]
+    fn manual_first_run_shows_the_boot_prompt() {
+        assert_eq!(startup_action(false, false), StartupAction::ShowBootPrompt);
+    }
+
+    #[test]
+    fn marker_reads_unanswered_until_written_then_stays_answered() {
+        let dir = unique_temp_dir();
+        let path = dir.join("boot_prompt_answered");
+
+        assert!(
+            !marker_answered(&path),
+            "fresh install: prompt not yet answered"
+        );
+        write_marker(&path);
+        assert!(
+            marker_answered(&path),
+            "answered persists → the prompt won't show again",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_marker_creates_a_missing_parent_dir() {
+        // On first run the app-data dir may not exist yet; the write must create
+        // it, or the marker never persists and the prompt re-fires every launch.
+        let dir = unique_temp_dir();
+        let nested = dir.join("app_data").join("boot_prompt_answered");
+        assert!(!nested.parent().unwrap().exists());
+
+        write_marker(&nested);
+        assert!(marker_answered(&nested));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A process-unique temp dir without pulling in a `tempfile` dev-dependency.
+    fn unique_temp_dir() -> PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("linodea_startup_test_{pid}_{n}"));
+        std::fs::create_dir_all(&dir).expect("create temp test dir");
+        dir
+    }
 }

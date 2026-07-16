@@ -361,12 +361,18 @@ pub fn run() {
             // is running: the first-run launch-on-boot prompt if unanswered, else
             // the capture bar. The prompt is triggered here — in unthrottled Rust
             // setup — instead of a hidden-window JS timer, which fired unreliably.
+            // The policy itself lives in `desktop::startup_action` (pure + tested).
             let launched_on_boot = std::env::args().any(|arg| arg == "--autostarted");
-            if !launched_on_boot {
-                let handle = app.handle();
-                if desktop::is_boot_prompt_answered(handle) {
+            let handle = app.handle();
+            match desktop::startup_action(
+                launched_on_boot,
+                desktop::is_boot_prompt_answered(handle),
+            ) {
+                desktop::StartupAction::StayHidden => {}
+                desktop::StartupAction::ShowCapture => {
                     let _ = desktop::show_capture_mode(handle);
-                } else {
+                }
+                desktop::StartupAction::ShowBootPrompt => {
                     let _ = desktop::prompt_launch_on_boot(handle);
                 }
             }
