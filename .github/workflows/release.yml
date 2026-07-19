@@ -1,0 +1,64 @@
+# Builds the Windows installer on a clean CI machine and drafts a GitHub Release.
+#
+# Trigger: push a version tag like `v0.1.0` (it must match the version in
+# apps/desktop/src-tauri/tauri.conf.json). The build runs on a fresh Windows
+# runner — that is what makes it reproducible and immune to the local
+# antivirus / asset-embedding issue (S68) that corrupts `tauri build` on the
+# dev machine.
+#
+# The release is created as a DRAFT: nothing is public until you review the
+# artifacts and click "Publish release" in the GitHub UI. Because `tsc` runs
+# inside the frontend build step, a type error fails the build (so a broken
+# build never produces a release).
+#
+# Updater signing is added later in L1b (it needs the signing keypair stored in
+# repo secrets). Until then this produces a plain, non-self-updating installer,
+# which is fine for the first clean-build verification.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Lets the default GITHUB_TOKEN create the release. NOTE: if your repo's
+# Settings -> Actions -> General -> Workflow permissions is set to "read-only",
+# this block alone is not enough — switch it to "Read and write permissions".
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88.0"
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer and draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: Linodea ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
