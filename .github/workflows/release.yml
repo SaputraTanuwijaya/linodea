@@ -11,9 +11,10 @@
 # inside the frontend build step, a type error fails the build (so a broken
 # build never produces a release).
 #
-# Updater signing is added later in L1b (it needs the signing keypair stored in
-# repo secrets). Until then this produces a plain, non-self-updating installer,
-# which is fine for the first clean-build verification.
+# The build also produces signed updater artifacts (`latest.json` + `.sig`), so
+# already-installed copies can self-update. That requires the two signing
+# secrets below AND a real `plugins.updater.pubkey` in tauri.conf.json — the
+# build fails without them.
 name: Release
 
 on:
@@ -56,6 +57,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing. Generate the keypair locally with
+          # `npm run tauri signer generate -- -w ~/.tauri/linodea.key` and store
+          # the PRIVATE key + its password as repo secrets. The matching PUBLIC
+          # key goes in tauri.conf.json (`plugins.updater.pubkey`). Without
+          # these the build fails, because createUpdaterArtifacts is on.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}

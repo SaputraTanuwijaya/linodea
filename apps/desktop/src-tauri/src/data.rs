@@ -216,14 +216,56 @@ impl ReminderStore {
         std::fs::create_dir_all(&app_data_dir).map_err(to_store_error)?;
 
         let database_path = app_data_dir.join("linodea.sqlite3");
+        let database_existed = database_path.exists();
         let connection = Connection::open(&database_path).map_err(to_store_error)?;
         let store = Self {
             connection,
             database_path,
         };
+        // Only an existing DB can be *upgraded*; a fresh install has nothing to
+        // lose. Runs before `migrate()` writes anything, so the file on disk is
+        // still consistent (no WAL, no open transaction) and safe to copy.
+        if database_existed {
+            store.backup_before_upgrade();
+        }
         store.migrate()?;
 
         Ok(store)
+    }
+
+    /// Copy the database aside before a schema upgrade.
+    ///
+    /// Before auto-update, a migration only ran when a build was launched by
+    /// hand. Now it runs unattended on every user's data the moment they accept
+    /// an update, so a bad migration would be silent and unrecoverable. One
+    /// rolling backup per source version (`linodea.v2.bak`) bounds disk use.
+    ///
+    /// Best-effort by design: every migration today is purely additive
+    /// (`ADD COLUMN` / `CREATE TABLE IF NOT EXISTS`), so a failed copy isn't
+    /// worth refusing to start over. **If a future migration ever drops or
+    /// rewrites data, make this fail-closed (return Err) before shipping it.**
+    fn backup_before_upgrade(&self) {
+        let existing = self.recorded_schema_version();
+        if existing >= CURRENT_SCHEMA_VERSION {
+            return; // already current — no migration will run, nothing to guard
+        }
+        let backup = self
+            .database_path
+            .with_file_name(format!("linodea.v{existing}.bak"));
+        let _ = std::fs::copy(&self.database_path, &backup);
+    }
+
+    /// Highest recorded migration version, or 0 when the DB predates the
+    /// `schema_migrations` table (or is unreadable). Never errors — it only
+    /// decides whether a backup is warranted.
+    fn recorded_schema_version(&self) -> i64 {
+        self.connection
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
     }
 
     pub fn database_path(&self) -> &Path {

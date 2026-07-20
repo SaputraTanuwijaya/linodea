@@ -347,6 +347,10 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        // Self-update: the frontend checks the `latest.json` endpoint in
+        // tauri.conf.json, and `process` supplies the relaunch after install.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
             app.manage(AppState {
