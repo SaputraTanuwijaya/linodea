@@ -29,6 +29,7 @@ export function PopupMenu({
   mode,
   onAction,
   strings,
+  updateReady = false,
 }: {
   anchor: MenuAnchor;
   menuRef: RefObject<HTMLDivElement | null>;
@@ -37,6 +38,8 @@ export function PopupMenu({
   mode: PopupMenuMode;
   onAction: (action: MenuAction) => void;
   strings: Strings;
+  /** A downloaded update waiting to install; dots the Settings item. */
+  updateReady?: boolean;
 }) {
   const { left, top } = clampMenuPosition(anchor);
 
@@ -65,6 +68,8 @@ export function PopupMenu({
       />
       <MenuItem
         disabled={mode === "settings"}
+        dot={updateReady}
+        dotLabel={strings.update.badgeLabel}
         label={strings.menu.settings}
         onClick={() => onAction("settings")}
       />
@@ -82,12 +87,17 @@ export function PopupMenu({
 function MenuItem({
   badge = 0,
   disabled,
+  dot = false,
+  dotLabel,
   label,
   onClick,
   variant,
 }: {
   badge?: number;
   disabled?: boolean;
+  /** Neutral accent dot — "something new here", not "something is wrong". */
+  dot?: boolean;
+  dotLabel?: string;
   label: string;
   onClick: () => void;
   variant?: "danger";
@@ -113,6 +123,12 @@ function MenuItem({
         <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--lin-danger)] px-1 text-[10px] font-bold leading-none text-white">
           {badge > 9 ? "9+" : badge}
         </span>
+      ) : dot ? (
+        <span
+          aria-label={dotLabel}
+          className="ml-auto h-2 w-2 shrink-0 rounded-full bg-[var(--lin-accent)]"
+          role="img"
+        />
       ) : null}
     </button>
   );

@@ -17,11 +17,21 @@ export function checkForUpdate(): Promise<Update | null> {
 }
 
 /**
- * Download, install, relaunch. `relaunch()` replaces the process, so nothing
- * after this call runs on the success path.
+ * Fetch the payload without applying it. Split from `installUpdate` on purpose:
+ * downloading is invisible and can happen whenever, while installing restarts
+ * the app — so only the restart needs the user's consent, and by then the bytes
+ * are already on disk and the click is instant.
+ */
+export function downloadUpdate(update: Update): Promise<void> {
+  return update.download();
+}
+
+/**
+ * Apply an already-downloaded update, then relaunch. `relaunch()` replaces the
+ * process, so nothing after this call runs on the success path.
  */
 export async function installUpdate(update: Update): Promise<void> {
-  await update.downloadAndInstall();
+  await update.install();
   await relaunch();
 }
 

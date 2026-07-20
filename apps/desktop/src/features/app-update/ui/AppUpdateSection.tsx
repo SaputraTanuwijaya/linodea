@@ -17,7 +17,8 @@ export function AppUpdateSection({
   strings: Strings;
 }) {
   const { phase, supported, currentVersion } = controller.state;
-  const busy = phase === "checking" || phase === "downloading";
+  const busy =
+    phase === "checking" || phase === "downloading" || phase === "installing";
 
   return (
     <div className="grid gap-3">
@@ -44,10 +45,10 @@ export function AppUpdateSection({
             : strings.update.checkButton}
         </button>
 
-        {phase === "available" ? (
+        {/* Only offered once the payload is on disk, so the click is instant. */}
+        {phase === "ready" ? (
           <button
             className="rounded-md border border-[var(--lin-border)] px-3 py-2 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={busy}
             onClick={() => void controller.install()}
             type="button"
           >
@@ -67,12 +68,14 @@ function statusText(
   switch (state.phase) {
     case "checking":
       return strings.update.checking;
-    case "available":
-      return strings.update.available(state.nextVersion ?? "");
+    case "downloading":
+      return strings.update.downloading(state.nextVersion ?? "");
+    case "ready":
+      return strings.update.ready(state.nextVersion ?? "");
+    case "installing":
+      return strings.update.installing;
     case "upToDate":
       return strings.update.upToDate;
-    case "downloading":
-      return strings.update.downloading;
     case "error":
       return strings.update.error;
     case "idle":

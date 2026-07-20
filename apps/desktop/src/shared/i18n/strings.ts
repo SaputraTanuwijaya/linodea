@@ -50,16 +50,6 @@ export interface Strings {
     keepOn: string;
     turnOff: string;
   };
-  /**
-   * Prompt shown when the automatic startup check finds a newer version. The
-   * confirm window only receives a `kind`, so the copy stays version-free.
-   */
-  updatePrompt: {
-    title: string;
-    body: string;
-    install: string;
-    later: string;
-  };
   placeholders: readonly string[];
   preview: {
     saving: string;
@@ -138,13 +128,16 @@ export interface Strings {
     notCheckedYet: string;
     checking: string;
     upToDate: string;
-    available: (version: string) => string;
-    downloading: string;
+    downloading: (version: string) => string;
+    ready: (version: string) => string;
+    installing: string;
     error: string;
     unavailable: string;
     currentVersion: (version: string) => string;
     checkButton: string;
     installButton: string;
+    /** Tooltip on the ••• badge dot. */
+    badgeLabel: string;
   };
   ai: {
     fallbackLabel: string;
@@ -250,12 +243,6 @@ const STRINGS: Record<LanguageId, Strings> = {
       keepOn: "Keep it on",
       turnOff: "Turn off anyway",
     },
-    updatePrompt: {
-      title: "Update Linodea?",
-      body: "A newer version is available. Linodea will download it and restart - it only takes a moment, and your reminders are kept.",
-      install: "Update now",
-      later: "Later",
-    },
     placeholders: [
       "in 20m check the oven",
       "tomorrow 9am call the dentist",
@@ -355,13 +342,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       notCheckedYet: "Not checked yet this session.",
       checking: "Checking for updates...",
       upToDate: "You're on the latest version.",
-      available: (version) => `Version ${version} is available.`,
-      downloading: "Downloading... Linodea restarts when it's ready.",
+      downloading: (version) => `Downloading version ${version}...`,
+      ready: (version) => `Version ${version} is ready to install.`,
+      installing: "Installing... Linodea will restart.",
       error: "Couldn't check for updates. Check your connection and try again.",
       unavailable: "Available only in the installed desktop app.",
       currentVersion: (version) => `Current version ${version}`,
       checkButton: "Check for updates",
-      installButton: "Download and restart",
+      installButton: "Restart to update",
+      badgeLabel: "An update is ready to install",
     },
     ai: {
       fallbackLabel: "Use AI when local parsing fails",
@@ -483,12 +472,6 @@ const STRINGS: Record<LanguageId, Strings> = {
       keepOn: "Biarkan aktif",
       turnOff: "Tetap matikan",
     },
-    updatePrompt: {
-      title: "Perbarui Linodea?",
-      body: "Versi baru tersedia. Linodea akan mengunduhnya lalu memulai ulang - hanya sebentar, dan semua pengingatmu tetap tersimpan.",
-      install: "Perbarui sekarang",
-      later: "Nanti saja",
-    },
     placeholders: [
       "20 menit lagi cek oven",
       "besok jam 9 telepon dokter gigi",
@@ -588,13 +571,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       notCheckedYet: "Belum diperiksa di sesi ini.",
       checking: "Memeriksa pembaruan...",
       upToDate: "Kamu sudah memakai versi terbaru.",
-      available: (version) => `Versi ${version} tersedia.`,
-      downloading: "Mengunduh... Linodea akan memulai ulang saat siap.",
+      downloading: (version) => `Mengunduh versi ${version}...`,
+      ready: (version) => `Versi ${version} siap dipasang.`,
+      installing: "Memasang... Linodea akan memulai ulang.",
       error: "Gagal memeriksa pembaruan. Periksa koneksimu lalu coba lagi.",
       unavailable: "Hanya tersedia di aplikasi desktop yang terpasang.",
       currentVersion: (version) => `Versi saat ini ${version}`,
       checkButton: "Periksa pembaruan",
-      installButton: "Unduh dan mulai ulang",
+      installButton: "Mulai ulang untuk memperbarui",
+      badgeLabel: "Pembaruan siap dipasang",
     },
     ai: {
       fallbackLabel: "Gunakan AI saat parser lokal gagal",

@@ -1,17 +1,25 @@
 /**
  * The app-update controller.
  *
- * Two entry points into the same state machine:
- *   - a silent auto-check shortly after mount; if the feed offers a newer
- *     version it asks through the themed confirm window (kind `"update"`),
- *     which `App` answers by calling `install()`.
- *   - `check()` from the Settings panel, which reports inline instead.
+ * Check and download run silently in the background; only the restart asks.
+ *
+ * v0.1.2 tried announcing a found update through the themed confirm window on a
+ * timer after mount. That failed on the installed build for two reasons worth
+ * recording, because both are structural rather than fixable bugs:
+ *   1. Windows refuses foreground to a background process, and the confirm
+ *      window sets `skipTaskbar`, so it had nothing to flash — it showed but
+ *      never came forward. (The alert window works precisely because it never
+ *      calls `set_focus`.)
+ *   2. More importantly, the only moment the app reliably *has* foreground is
+ *      when the user summons the capture bar — and hijacking that with an
+ *      update dialog breaks the one promise the app exists to keep.
+ * So there is no prompt. An update that is downloaded and ready surfaces as a
+ * quiet badge (see `phase === "ready"`); the Settings panel carries the detail.
  *
  * Failure is always silent-and-inert on the auto path: no network, no feed
  * published yet, a GitHub hiccup — none of it may block capture.
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isTauriRuntime } from "@/shared/lib";
@@ -19,21 +27,17 @@ import { isTauriRuntime } from "@/shared/lib";
 import type { AppUpdateController, AppUpdateState } from "./types";
 import {
   checkForUpdate,
+  downloadUpdate,
   installUpdate,
   readCurrentVersion,
   type Update,
 } from "./updater";
 
 /**
- * Delay before the automatic check.
- *
- * Not a politeness knob — a collision guard. Rust keeps a *single* pending
- * confirm slot (`desktop::PENDING_CONFIRM`), so a second `show_confirm` while
- * one is open replaces the kind the window is rendering. The first-run
- * launch-on-boot prompt is fired from Rust `setup()` at t=0 and, if clobbered,
- * would never be answered — so its marker never gets written and it re-prompts
- * every launch. Waiting lets that prompt be answered first. Cheap insurance:
- * an update offered 20s after launch is no worse than one offered instantly.
+ * Delay before the automatic check, so a cold start spends its first seconds on
+ * the things the user is waiting for (window, DB, scheduler) rather than a
+ * network round-trip. Nothing announces itself now, so the exact value is not
+ * load-bearing the way it was in v0.1.2.
  */
 const AUTO_CHECK_DELAY_MS = 20_000;
 
@@ -65,20 +69,22 @@ export function useAppUpdate(): AppUpdateController {
         return;
       }
 
+      // Found one: pull it down straight away. Downloading costs the user
+      // nothing (no window, no restart), and it means the eventual click
+      // applies instantly instead of stalling on a network transfer.
       setState((current) => ({
         ...current,
-        phase: "available",
+        phase: "downloading",
         currentVersion: current.currentVersion ?? update.currentVersion,
         nextVersion: update.version,
       }));
-
-      if (silent) {
-        // Auto path: the popup is usually hidden, so ask through the confirm
-        // window (it shows and focuses itself). `App` handles the result.
-        await invoke("show_confirm", { payload: { kind: "update" } });
-      }
+      await downloadUpdate(update);
+      setState((current) => ({ ...current, phase: "ready" }));
     } catch {
       // A manual check earned an explanation; an auto-check just goes quiet.
+      // Drop the handle either way so a later install() can't act on a payload
+      // that was never fully fetched.
+      pendingRef.current = null;
       setState((current) => ({ ...current, phase: silent ? "idle" : "error" }));
     }
   }, []);
@@ -108,7 +114,7 @@ export function useAppUpdate(): AppUpdateController {
   const install = useCallback(async () => {
     const update = pendingRef.current;
     if (!update) return;
-    setState((current) => ({ ...current, phase: "downloading" }));
+    setState((current) => ({ ...current, phase: "installing" }));
     try {
       await installUpdate(update);
     } catch {

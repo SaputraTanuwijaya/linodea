@@ -9,11 +9,16 @@ export type AppUpdatePhase =
   /** Nothing checked yet this session (or a silent check failed). */
   | "idle"
   | "checking"
-  /** The feed offers a newer version; `nextVersion` is set. */
-  | "available"
   | "upToDate"
-  /** Downloading + installing. The app relaunches at the end of this phase. */
+  /** Fetching the payload in the background. Not disruptive, so never prompts. */
   | "downloading"
+  /**
+   * Downloaded and waiting on the user. This is the only phase that badges:
+   * it is the only one where clicking does something instant.
+   */
+  | "ready"
+  /** Applying. The app relaunches at the end of this phase, so it is brief. */
+  | "installing"
   /** Only ever set by a manual check — silent checks fall back to "idle". */
   | "error";
 
@@ -30,11 +35,13 @@ export interface AppUpdateState {
 export interface AppUpdateController {
   state: AppUpdateState;
   /**
-   * Manual check from Settings. Surfaces "checking" / "up to date" / "error"
-   * inline instead of opening the confirm window — the user is already looking
-   * at the panel that answers them.
+   * Manual check from Settings. Reports inline; a found update downloads
+   * itself in the background exactly like the automatic check does.
    */
   check: () => Promise<void>;
-  /** Download + install the pending update, then relaunch. Never returns. */
+  /**
+   * Apply the already-downloaded update and relaunch. Never returns on the
+   * success path. No-op unless the phase is "ready".
+   */
   install: () => Promise<void>;
 }

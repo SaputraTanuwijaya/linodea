@@ -87,6 +87,7 @@ export function CapturePage({
   onSaved,
   shouldHideAfterSave,
   strings,
+  updateReady = false,
 }: {
   aiAssist: AiAssistController;
   /** Forwarded so App.tsx can refocus the input on window focus events. */
@@ -100,6 +101,12 @@ export function CapturePage({
   /** True only in capture mode — list/settings modes keep the popup open. */
   shouldHideAfterSave: boolean;
   strings: Strings;
+  /**
+   * A downloaded update is waiting. Shown as a neutral accent dot rather than
+   * the red missed-count badge: this is news, not a problem. The missed badge
+   * wins the corner when both apply — a dropped reminder outranks an update.
+   */
+  updateReady?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [caret, setCaret] = useState(0);
@@ -663,6 +670,8 @@ export function CapturePage({
           <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--lin-danger)] px-1 text-[9px] font-bold leading-none text-white">
             {missedCount > 9 ? "9+" : missedCount}
           </span>
+        ) : updateReady ? (
+          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--lin-accent)]" />
         ) : null}
       </button>
     </form>

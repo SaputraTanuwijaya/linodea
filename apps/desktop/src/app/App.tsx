@@ -74,9 +74,10 @@ function App() {
   const [prealertConfig, setPrealertConfig] = usePrealerts();
   const [autostart, setAutostart] = useAutostart();
   const aiAssist = useAiAssist();
-  // Owns its own startup check; App only answers the confirm window for it.
+  // Owns its own background check + download. Nothing here drives it; App only
+  // reads "ready" to badge the ••• button, and the Settings panel does the rest.
   const appUpdate = useAppUpdate();
-  const installAppUpdate = appUpdate.install;
+  const updateReady = appUpdate.state.phase === "ready";
 
   const strings = useMemo(() => stringsFor(language), [language]);
 
@@ -185,12 +186,6 @@ function App() {
           // and hid Settings, so reopen Settings to show the toggle's new state.
           if (confirmed) void setAutostart(false);
           void invoke("enter_settings_mode").catch(() => undefined);
-        } else if (kind === "update") {
-          // Downloads in the background and relaunches when done — deliberately
-          // without surfacing a window: the user asked for this and expects a
-          // restart, so stealing focus mid-work would be worse than silence.
-          // Declining ("Later") just leaves it for the next launch's check.
-          if (confirmed) void installAppUpdate();
         }
       },
     ).then((fn) => {
@@ -205,7 +200,7 @@ function App() {
       mounted = false;
       unlisten?.();
     };
-  }, [installAppUpdate]);
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -370,6 +365,7 @@ function App() {
               language={language}
               missedCount={missedCount}
               onMenuButtonClick={handleMenuButtonClick}
+              updateReady={updateReady}
               onSaved={() => {
                 setListRefreshKey((k) => k + 1);
                 // Arm a precise timer for the reminder just captured (e.g. an
@@ -409,6 +405,7 @@ function App() {
           mode={mode}
           onAction={handleMenuAction}
           strings={strings}
+          updateReady={updateReady}
         />
       ) : null}
     </main>
