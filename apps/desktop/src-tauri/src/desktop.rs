@@ -22,7 +22,10 @@ const NOTIFY_EVENT: &str = "linodea:notify";
 const TIMER_EVENT: &str = "linodea:timer";
 /// Carries the confirmation kind ("quit" | "autostart") to the confirm window.
 const CONFIRM_EVENT: &str = "linodea:confirm";
-const ALERT_SIZE: (f64, f64) = (360.0, 120.0);
+// Grown from 360x120 in v0.1.2: the 30s dwell needs room for larger Snooze/Done
+// hit targets (they were reported as hard to click, and since S72 they are the
+// only path to completing a reminder).
+const ALERT_SIZE: (f64, f64) = (360.0, 140.0);
 const TIMER_SIZE: (f64, f64) = (220.0, 120.0);
 const CONFIRM_SIZE: (f64, f64) = (380.0, 200.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
@@ -96,7 +99,18 @@ pub struct AlertPayload {
 /// Show the custom alert window bottom-right, carrying `payload`. Deliberately
 /// never focuses the window — it grabs attention without stealing input.
 pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
+    // Both windows pin to the same bottom-right anchor, and the timer hides
+    // *itself* when its countdown hits zero — the same instant the alert fires.
+    // Whichever won that race decided whether the timer covered the alert, so
+    // the bug was intermittent (seen in S74, absent in S75, code unchanged).
+    // Hiding it here makes the order explicit instead of raced. The timer is
+    // display-only, so an alert outranks it.
+    let _ = hide_timer(app);
+
     let window = alert_window(app)?;
+    // Size is set here so ALERT_SIZE stays the single source of truth for both
+    // the window and the positioning math below.
+    let _ = window.set_size(LogicalSize::new(ALERT_SIZE.0, ALERT_SIZE.1));
     let _ = position_bottom_right(&window, ALERT_SIZE);
     let _ = app.emit_to(ALERT_WINDOW_LABEL, NOTIFY_EVENT, payload);
     window.show()?;
