@@ -13,8 +13,10 @@ linked-node Linodea mark and rotates general example prompts when reopened;
 invalid non-empty captures stay open and play a short
 error cue. The popup auto-hides on focus loss. Tray icon and close-to-tray remain. The tray's Reminders view lists
 queued reminders with per-row done / snooze / edit / delete. Settings use a category
-navigator for theme, language, configurable prealerts, launch-on-startup, and optional
-AI Assist. `/ai` opens Gemini setup; normal reminders remain local and instant, while
+navigator for theme, language, configurable prealerts, launch-on-startup, optional
+AI Assist, and updates. Linodea checks for a newer version shortly after it starts and
+always asks before downloading and restarting; the same check can be run by hand from
+Settings. `/ai` opens Gemini setup; normal reminders remain local and instant, while
 enabled AI Assist only receives failed or suspicious reminder phrases as a fallback.
 AI setup links directly to Google AI Studio, keeps connected credentials collapsed,
 and reserves provider choices for future adapters without presenting them as available.

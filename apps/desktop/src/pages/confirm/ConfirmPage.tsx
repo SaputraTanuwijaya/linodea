@@ -7,6 +7,8 @@
  *   - "autostart"    — first-run prompt to enable launch-on-boot (recommended).
  *   - "autostartOff" — confirm turning OFF launch-on-startup in Settings
  *                      (reduces reliability the same way quitting does).
+ *   - "update"       — the startup check found a newer version; confirming
+ *                      downloads it and restarts the app.
  *
  * Themed + i18n like the rest of the app, so it replaces the native OS dialog
  * (which read as an error/system alert and broke the app's visual language).
@@ -24,7 +26,7 @@ import { stringsFor } from "@/shared/i18n";
 const CONFIRM_EVENT = "linodea:confirm";
 const RESULT_EVENT = "linodea:confirm-result";
 
-type ConfirmKind = "quit" | "autostart" | "autostartOff";
+type ConfirmKind = "quit" | "autostart" | "autostartOff" | "update";
 
 interface ConfirmPayload {
   kind: ConfirmKind;
@@ -86,6 +88,16 @@ export function ConfirmPage() {
         primaryConfirmed: false,
         secondaryLabel: strings.disableAutostartConfirm.turnOff,
         secondaryDanger: true,
+      };
+    }
+    if (kind === "update") {
+      return {
+        title: strings.updatePrompt.title,
+        body: strings.updatePrompt.body,
+        primaryLabel: strings.updatePrompt.install, // recommended
+        primaryConfirmed: true,
+        secondaryLabel: strings.updatePrompt.later,
+        secondaryDanger: false,
       };
     }
     return null;

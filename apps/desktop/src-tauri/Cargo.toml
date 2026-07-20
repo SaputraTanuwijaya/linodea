@@ -1,6 +1,6 @@
 [package]
 name = "linodea-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Linodea desktop app"
 authors = ["Saputra Tanuwijaya"]
 edition = "2021"

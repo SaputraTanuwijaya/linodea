@@ -6,8 +6,8 @@
  *   - menu open/close state and the click-outside / Escape handlers for it
  *   - composition of the popup shell: logo, capture form, page body, menu
  *   - a "list refresh signal" so the list page reflects new captures
- *   - feature-state hooks (theme, language, prealerts, autostart) gathered
- *     into a single SettingsBundle for SettingsPage
+ *   - feature-state hooks (theme, language, prealerts, autostart, app-update)
+ *     gathered into a single SettingsBundle for SettingsPage
  *
  * Does NOT own:
  *   - the capture form's input state or save flow → CapturePage
@@ -31,6 +31,7 @@ import {
   type ReminderNotificationScheduler,
 } from "@/entities/reminder";
 import { useAiAssist } from "@/features/ai-assist";
+import { useAppUpdate } from "@/features/app-update";
 import { useLanguage } from "@/features/language";
 import { usePrealerts } from "@/features/prealerts";
 import { useAutostart } from "@/features/startup";
@@ -73,6 +74,9 @@ function App() {
   const [prealertConfig, setPrealertConfig] = usePrealerts();
   const [autostart, setAutostart] = useAutostart();
   const aiAssist = useAiAssist();
+  // Owns its own startup check; App only answers the confirm window for it.
+  const appUpdate = useAppUpdate();
+  const installAppUpdate = appUpdate.install;
 
   const strings = useMemo(() => stringsFor(language), [language]);
 
@@ -86,6 +90,7 @@ function App() {
       prealerts: { value: prealertConfig, set: setPrealertConfig },
       autostart: { value: autostart, set: setAutostart },
       aiAssist,
+      appUpdate,
     }),
     [
       strings,
@@ -98,6 +103,7 @@ function App() {
       autostart,
       setAutostart,
       aiAssist,
+      appUpdate,
     ],
   );
 
@@ -159,8 +165,8 @@ function App() {
     let mounted = true;
     let unlisten: UnlistenFn | undefined;
 
-    // The themed confirm window (quit / autostart) reports the user's choice
-    // here; the action lives in the main window where quit + autostart live.
+    // The themed confirm window (quit / autostart / update) reports the user's
+    // choice here; the action lives in the main window that owns the state.
     void listen<{ kind: string; confirmed: boolean }>(
       CONFIRM_RESULT_EVENT,
       (event) => {
@@ -179,6 +185,12 @@ function App() {
           // and hid Settings, so reopen Settings to show the toggle's new state.
           if (confirmed) void setAutostart(false);
           void invoke("enter_settings_mode").catch(() => undefined);
+        } else if (kind === "update") {
+          // Downloads in the background and relaunches when done — deliberately
+          // without surfacing a window: the user asked for this and expects a
+          // restart, so stealing focus mid-work would be worse than silence.
+          // Declining ("Later") just leaves it for the next launch's check.
+          if (confirmed) void installAppUpdate();
         }
       },
     ).then((fn) => {
@@ -193,7 +205,7 @@ function App() {
       mounted = false;
       unlisten?.();
     };
-  }, []);
+  }, [installAppUpdate]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

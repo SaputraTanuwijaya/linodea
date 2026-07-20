@@ -50,6 +50,16 @@ export interface Strings {
     keepOn: string;
     turnOff: string;
   };
+  /**
+   * Prompt shown when the automatic startup check finds a newer version. The
+   * confirm window only receives a `kind`, so the copy stays version-free.
+   */
+  updatePrompt: {
+    title: string;
+    body: string;
+    install: string;
+    later: string;
+  };
   placeholders: readonly string[];
   preview: {
     saving: string;
@@ -96,6 +106,7 @@ export interface Strings {
     language: { title: string; hint: string };
     startup: { title: string; hint: string };
     ai: { title: string; hint: string };
+    updates: { title: string; hint: string };
   };
   themes: {
     dark: { name: string; description: string };
@@ -122,6 +133,18 @@ export interface Strings {
     toggleLabel: string;
     toggleHint: string;
     unavailable: string;
+  };
+  update: {
+    notCheckedYet: string;
+    checking: string;
+    upToDate: string;
+    available: (version: string) => string;
+    downloading: string;
+    error: string;
+    unavailable: string;
+    currentVersion: (version: string) => string;
+    checkButton: string;
+    installButton: string;
   };
   ai: {
     fallbackLabel: string;
@@ -227,6 +250,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       keepOn: "Keep it on",
       turnOff: "Turn off anyway",
     },
+    updatePrompt: {
+      title: "Update Linodea?",
+      body: "A newer version is available. Linodea will download it and restart - it only takes a moment, and your reminders are kept.",
+      install: "Update now",
+      later: "Later",
+    },
     placeholders: [
       "in 20m check the oven",
       "tomorrow 9am call the dentist",
@@ -294,6 +323,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "AI Assist",
         hint: "Optional Gemini fallback for unusual time phrases the local parser cannot resolve.",
       },
+      updates: {
+        title: "Updates",
+        hint: "Linodea checks for a newer version shortly after it starts and always asks before installing.",
+      },
     },
     themes: {
       dark: { name: "Dark", description: "Default. Easy on the eyes for night capture." },
@@ -317,6 +350,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleLabel: "Launch on startup",
       toggleHint: "Linodea starts hidden in the tray and waits for the global shortcut.",
       unavailable: "Available only in the desktop app.",
+    },
+    update: {
+      notCheckedYet: "Not checked yet this session.",
+      checking: "Checking for updates...",
+      upToDate: "You're on the latest version.",
+      available: (version) => `Version ${version} is available.`,
+      downloading: "Downloading... Linodea restarts when it's ready.",
+      error: "Couldn't check for updates. Check your connection and try again.",
+      unavailable: "Available only in the installed desktop app.",
+      currentVersion: (version) => `Current version ${version}`,
+      checkButton: "Check for updates",
+      installButton: "Download and restart",
     },
     ai: {
       fallbackLabel: "Use AI when local parsing fails",
@@ -438,6 +483,12 @@ const STRINGS: Record<LanguageId, Strings> = {
       keepOn: "Biarkan aktif",
       turnOff: "Tetap matikan",
     },
+    updatePrompt: {
+      title: "Perbarui Linodea?",
+      body: "Versi baru tersedia. Linodea akan mengunduhnya lalu memulai ulang - hanya sebentar, dan semua pengingatmu tetap tersimpan.",
+      install: "Perbarui sekarang",
+      later: "Nanti saja",
+    },
     placeholders: [
       "20 menit lagi cek oven",
       "besok jam 9 telepon dokter gigi",
@@ -505,6 +556,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Bantuan AI",
         hint: "Gemini opsional untuk frasa waktu tidak biasa yang gagal dipahami parser lokal.",
       },
+      updates: {
+        title: "Pembaruan",
+        hint: "Linodea memeriksa versi baru sesaat setelah dijalankan dan selalu bertanya sebelum memasang.",
+      },
     },
     themes: {
       dark: { name: "Gelap", description: "Bawaan. Nyaman untuk malam hari." },
@@ -528,6 +583,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       toggleLabel: "Jalankan saat startup",
       toggleHint: "Linodea berjalan tersembunyi di tray dan menunggu pintasan global.",
       unavailable: "Hanya tersedia di aplikasi desktop.",
+    },
+    update: {
+      notCheckedYet: "Belum diperiksa di sesi ini.",
+      checking: "Memeriksa pembaruan...",
+      upToDate: "Kamu sudah memakai versi terbaru.",
+      available: (version) => `Versi ${version} tersedia.`,
+      downloading: "Mengunduh... Linodea akan memulai ulang saat siap.",
+      error: "Gagal memeriksa pembaruan. Periksa koneksimu lalu coba lagi.",
+      unavailable: "Hanya tersedia di aplikasi desktop yang terpasang.",
+      currentVersion: (version) => `Versi saat ini ${version}`,
+      checkButton: "Periksa pembaruan",
+      installButton: "Unduh dan mulai ulang",
     },
     ai: {
       fallbackLabel: "Gunakan AI saat parser lokal gagal",

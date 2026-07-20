@@ -137,7 +137,8 @@ pub fn hide_timer(app: &AppHandle) -> tauri::Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmPayload {
-    /// "quit" | "autostart".
+    /// "quit" | "autostart" | "autostartOff" | "update". Passed through
+    /// unchanged — new kinds are frontend-only (copy + result handling).
     pub kind: String,
 }
 

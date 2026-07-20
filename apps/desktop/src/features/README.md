@@ -17,6 +17,4 @@ features/<name>/
 - Cross-feature imports are forbidden. If two features need to share something, it moves to `shared/`.
 - Other layers import only from `features/<name>` (the `index.ts`), never internal files.
 
-**Planned features:** `theme`, `language`, `prealerts`, `startup`, `autocorrect-display`.
-
 See `.claude/skills/linodea-frontend-architecture/SKILL.md` for the full architecture.
