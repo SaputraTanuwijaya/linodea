@@ -9,7 +9,7 @@
  * link on is a one-line edit here.
  */
 
-// TODO(Saputra): paste the real URLs before launch.
-export const KO_FI_URL = "";
-export const SAWERIA_URL = "";
+export const KO_FI_URL = "https://ko-fi.com/stratsix";
+export const SAWERIA_URL = "https://saweria.co/stratsix";
+// TODO(Saputra): paste the Google Form URL once the feedback form exists.
 export const FEEDBACK_FORM_URL = "";
