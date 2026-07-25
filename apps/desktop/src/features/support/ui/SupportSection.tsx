@@ -13,6 +13,7 @@
  */
 
 import { openUrl } from "@tauri-apps/plugin-opener";
+import type { ReactNode } from "react";
 
 import { FEEDBACK_FORM_URL, KO_FI_URL, SAWERIA_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
@@ -32,12 +33,14 @@ export function SupportSection({ strings }: { strings: Strings }) {
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <LinkButton
+            icon={<LogoChip src="/brand/kofi.svg" />}
             label={strings.support.koFi}
             onOpen={() => void open(KO_FI_URL)}
             soonLabel={strings.support.comingSoon}
             url={KO_FI_URL}
           />
           <LinkButton
+            icon={<LogoChip fill src="/brand/Saweria_512px.png" />}
             label={strings.support.saweria}
             onOpen={() => void open(SAWERIA_URL)}
             soonLabel={strings.support.comingSoon}
@@ -75,12 +78,14 @@ export function SupportSection({ strings }: { strings: Strings }) {
  */
 function LinkButton({
   accent = false,
+  icon,
   label,
   onOpen,
   soonLabel,
   url,
 }: {
   accent?: boolean;
+  icon?: ReactNode;
   label: string;
   onOpen: () => void;
   soonLabel: string;
@@ -89,16 +94,17 @@ function LinkButton({
   const ready = url.length > 0;
   const style = accent
     ? "bg-[var(--lin-accent)] text-[var(--lin-bg)]"
-    : "border border-[var(--lin-border)] text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]";
+    : "border border-[var(--lin-border)] text-[var(--lin-text)] transition hover:border-[var(--lin-text-dim)] hover:bg-[var(--lin-bg-hover)]";
 
   return (
     <span className="inline-flex items-center gap-2">
       <button
-        className={`rounded-md px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${style}`}
+        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${style}`}
         disabled={!ready}
         onClick={onOpen}
         type="button"
       >
+        {icon}
         {label}
       </button>
       {ready ? null : (
@@ -106,6 +112,28 @@ function LinkButton({
           {soonLabel}
         </span>
       )}
+    </span>
+  );
+}
+
+/**
+ * A brand logo in a small white "coin" chip. The chip gives the logo a
+ * consistent light backing so the Ko-fi cup (dark outline on transparent) reads
+ * on the dark theme, while Saweria (a self-contained orange circle mark) fills
+ * the chip edge-to-edge. `fill` = cover the chip (already-circular marks);
+ * otherwise the logo is padded inside (transparent marks like the Ko-fi cup).
+ */
+function LogoChip({ src, fill = false }: { src: string; fill?: boolean }) {
+  return (
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white ring-1 ring-black/10">
+      <img
+        alt=""
+        aria-hidden="true"
+        className={
+          fill ? "h-full w-full object-cover" : "h-3.5 w-3.5 object-contain"
+        }
+        src={src}
+      />
     </span>
   );
 }
