@@ -75,6 +75,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     kind: "action",
     strings: (s) => s.slash.settings,
   },
+  {
+    // Picking `/feedback` doesn't insert text and doesn't switch mode — the
+    // capture page intercepts it and opens the external feedback form. Inserts
+    // no text.
+    name: "feedback",
+    kind: "action",
+    strings: (s) => s.slash.feedback,
+  },
 ];
 
 /** Lower-cased set of every command name + alias, for the input highlighter. */

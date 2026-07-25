@@ -97,6 +97,7 @@ export interface Strings {
     startup: { title: string; hint: string };
     ai: { title: string; hint: string };
     updates: { title: string; hint: string };
+    support: { title: string; hint: string };
   };
   themes: {
     dark: { name: string; description: string };
@@ -139,9 +140,21 @@ export interface Strings {
     /** Tooltip on the ••• badge dot. */
     badgeLabel: string;
   };
+  /** Settings → Support: donation links + feedback form. */
+  support: {
+    intro: string;
+    koFi: string;
+    saweria: string;
+    comingSoon: string;
+    feedbackTitle: string;
+    feedbackHint: string;
+    feedbackButton: string;
+  };
   ai: {
     fallbackLabel: string;
     fallbackHint: string;
+    /** Shown under the toggle when it's off because no key is saved yet. */
+    fallbackNeedsKey: string;
     unavailable: string;
     providerLabel: string;
     providerHint: string;
@@ -193,6 +206,7 @@ export interface Strings {
     list: { label: string; description: string };
     chain: { label: string; description: string };
     settings: { label: string; description: string };
+    feedback: { label: string; description: string };
   };
   /** /link anchor picker (phase 2 of the dropdown) + the bound-anchor chip. */
   link: {
@@ -314,6 +328,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Updates",
         hint: "Linodea checks for a newer version shortly after it starts and always asks before installing.",
       },
+      support: {
+        title: "Support",
+        hint: "Keep Linodea going, and tell me what to build next.",
+      },
     },
     themes: {
       dark: { name: "Dark", description: "Default. Easy on the eyes for night capture." },
@@ -352,9 +370,21 @@ const STRINGS: Record<LanguageId, Strings> = {
       installButton: "Restart to update",
       badgeLabel: "An update is ready to install",
     },
+    support: {
+      intro:
+        "Linodea is free and every feature is included. Donations keep it going.",
+      koFi: "Ko-fi",
+      saweria: "Saweria",
+      comingSoon: "Link coming soon",
+      feedbackTitle: "Send feedback",
+      feedbackHint:
+        "Found a bug or have an idea? A short form comes straight to me.",
+      feedbackButton: "Open feedback form",
+    },
     ai: {
       fallbackLabel: "Use AI when local parsing fails",
       fallbackHint: "Normal reminders stay instant and offline. Gemini is contacted only as a fallback.",
+      fallbackNeedsKey: "Add a Gemini API key below to switch this on.",
       unavailable: "Available only in the installed desktop app.",
       providerLabel: "Provider",
       providerHint: "Gemini is recommended for its generous free tier. OpenAI and Anthropic support are planned.",
@@ -429,6 +459,10 @@ const STRINGS: Record<LanguageId, Strings> = {
       settings: {
         label: "/settings",
         description: "Open Settings (theme, language, prealerts, startup).",
+      },
+      feedback: {
+        label: "/feedback",
+        description: "Open the feedback form in your browser.",
       },
     },
     link: {
@@ -543,6 +577,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Pembaruan",
         hint: "Linodea memeriksa versi baru sesaat setelah dijalankan dan selalu bertanya sebelum memasang.",
       },
+      support: {
+        title: "Dukungan",
+        hint: "Bantu Linodea terus berjalan, dan beri tahu saya fitur berikutnya.",
+      },
     },
     themes: {
       dark: { name: "Gelap", description: "Bawaan. Nyaman untuk malam hari." },
@@ -581,9 +619,21 @@ const STRINGS: Record<LanguageId, Strings> = {
       installButton: "Mulai ulang untuk memperbarui",
       badgeLabel: "Pembaruan siap dipasang",
     },
+    support: {
+      intro:
+        "Linodea gratis dan semua fitur sudah termasuk. Donasi membantu pengembangannya terus berjalan.",
+      koFi: "Ko-fi",
+      saweria: "Saweria",
+      comingSoon: "Tautan segera hadir",
+      feedbackTitle: "Kirim masukan",
+      feedbackHint:
+        "Menemukan bug atau punya ide? Formulir singkat langsung sampai ke saya.",
+      feedbackButton: "Buka formulir masukan",
+    },
     ai: {
       fallbackLabel: "Gunakan AI saat parser lokal gagal",
       fallbackHint: "Pengingat biasa tetap instan dan offline. Gemini hanya dihubungi sebagai cadangan.",
+      fallbackNeedsKey: "Tambahkan API key Gemini di bawah untuk mengaktifkannya.",
       unavailable: "Hanya tersedia di aplikasi desktop yang terpasang.",
       providerLabel: "Penyedia",
       providerHint: "Gemini disarankan karena tingkat gratisnya cukup besar. Dukungan OpenAI dan Anthropic direncanakan.",
@@ -658,6 +708,10 @@ const STRINGS: Record<LanguageId, Strings> = {
       settings: {
         label: "/settings",
         description: "Buka Pengaturan (tema, bahasa, prealert, startup).",
+      },
+      feedback: {
+        label: "/feedback",
+        description: "Buka formulir masukan di peramban kamu.",
       },
     },
     link: {

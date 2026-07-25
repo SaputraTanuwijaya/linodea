@@ -24,6 +24,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { parseAnchorLink, parseReminder } from "@linodea/parser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -60,6 +61,7 @@ import {
   listReminderNodes,
   moveReminderNode,
 } from "@/entities/reminder";
+import { FEEDBACK_FORM_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import { formatDateTime, getDeviceId, isTauriRuntime, playUiSound } from "@/shared/lib";
 
@@ -273,12 +275,28 @@ export function CapturePage({
       void enterAnchorMode();
       return;
     }
+    if (suggestion.command.name === "feedback") {
+      openFeedback();
+      return;
+    }
     const navCommand = NAV_COMMANDS[suggestion.command.name];
     if (navCommand) {
       leaveCaptureFor(navCommand);
       return;
     }
     applySlash(slash.applyCommand(suggestion));
+  }
+
+  /** `/feedback` opens the external feedback form and clears the command text,
+   *  staying in the capture bar (unlike the nav commands). No-op beyond the
+   *  clear when the URL isn't configured yet, so it never opens a dead page. */
+  function openFeedback() {
+    setInput("");
+    setCaret(0);
+    focusInput(ref.current);
+    if (FEEDBACK_FORM_URL && isTauriRuntime()) {
+      void openUrl(FEEDBACK_FORM_URL).catch(() => undefined);
+    }
   }
 
   /** Leave the capture bar for another popup mode via a slash command. Suppress

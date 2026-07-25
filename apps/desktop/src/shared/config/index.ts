@@ -4,3 +4,4 @@
  */
 
 export { CATEGORY_COLOR, categoryColor } from "./categories";
+export { KO_FI_URL, SAWERIA_URL, FEEDBACK_FORM_URL } from "./links";

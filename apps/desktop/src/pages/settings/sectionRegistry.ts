@@ -15,6 +15,7 @@ import { themeSettingsSection } from "@/features/theme";
 import { languageSettingsSection } from "@/features/language";
 import { prealertsSettingsSection } from "@/features/prealerts";
 import { startupSettingsSection } from "@/features/startup";
+import { supportSettingsSection } from "@/features/support";
 import type { SettingsSectionDescriptor } from "@/shared/settings";
 
 export const SETTINGS_SECTIONS: SettingsSectionDescriptor[] = [
@@ -24,4 +25,5 @@ export const SETTINGS_SECTIONS: SettingsSectionDescriptor[] = [
   startupSettingsSection,
   aiAssistSettingsSection,
   appUpdateSettingsSection,
+  supportSettingsSection,
 ].sort((a, b) => a.order - b.order);

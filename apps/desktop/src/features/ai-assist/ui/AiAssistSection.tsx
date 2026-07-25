@@ -56,7 +56,11 @@ export function AiAssistSection({
             {strings.ai.fallbackLabel}
           </p>
           <p className="mt-1 text-xs leading-5 text-[var(--lin-text-dim)]">
-            {available ? strings.ai.fallbackHint : strings.ai.unavailable}
+            {!available
+              ? strings.ai.unavailable
+              : configured
+                ? strings.ai.fallbackHint
+                : strings.ai.fallbackNeedsKey}
           </p>
         </div>
         <button
