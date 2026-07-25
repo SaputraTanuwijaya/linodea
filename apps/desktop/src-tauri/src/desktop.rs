@@ -114,7 +114,7 @@ pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
     let _ = position_bottom_right(&window, ALERT_SIZE);
     let _ = app.emit_to(ALERT_WINDOW_LABEL, NOTIFY_EVENT, payload);
     window.show()?;
-    let _ = window.set_always_on_top(true);
+    raise_to_top(&window);
     Ok(())
 }
 
@@ -138,7 +138,7 @@ pub fn show_timer(app: &AppHandle, payload: TimerPayload) -> tauri::Result<()> {
     let _ = position_bottom_right(&window, TIMER_SIZE);
     let _ = app.emit_to(TIMER_WINDOW_LABEL, TIMER_EVENT, payload);
     window.show()?;
-    let _ = window.set_always_on_top(true);
+    raise_to_top(&window);
     Ok(())
 }
 
@@ -278,6 +278,23 @@ fn alert_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 fn timer_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     app.get_webview_window(TIMER_WINDOW_LABEL)
         .ok_or(tauri::Error::WindowNotFound)
+}
+
+/// Force `window` to the very top of the always-on-top band.
+///
+/// `set_always_on_top(true)` on a window that is *already* marked topmost (all
+/// the aux windows set `alwaysOnTop: true` in `tauri.conf.json`) can be a no-op
+/// that does not re-issue the platform "move to top of topmost" call — so the
+/// window stays below anything that became topmost *after* it was created, e.g.
+/// a game or a browser that just went fullscreen. Toggling off→on re-issues it
+/// unconditionally, re-raising us to the top of the topmost band.
+///
+/// Ceiling: this cannot cover a true *exclusive-fullscreen* app — nothing in
+/// user space can. It targets borderless/windowed-fullscreen and normal windows,
+/// which is the common multitasking case (browser fullscreen video included).
+fn raise_to_top(window: &WebviewWindow) {
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
 }
 
 /// Pin `window` to the bottom-right of its current monitor, leaving margin and
