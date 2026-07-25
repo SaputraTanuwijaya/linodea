@@ -93,6 +93,10 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 
 Later sync/backend work may use Go, PostgreSQL, and PASETO, but that is outside the MVP skeleton.
 
+## License
+
+Linodea is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may read, build, modify, and share it for any **noncommercial** purpose — including building from source yourself to verify a release — while commercial use is reserved to the author. See [`LICENSE`](LICENSE) for the full terms; this note is a summary, not a substitute.
+
 ## Local Tooling
 
 - Node.js `22.14.0` is recorded in `.node-version`.
