@@ -24,10 +24,8 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 
 import { getStoredLanguage } from "@/features/language";
+import { CONFIRM_EVENT, CONFIRM_RESULT_EVENT } from "@/shared/config";
 import { stringsFor } from "@/shared/i18n";
-
-const CONFIRM_EVENT = "linodea:confirm";
-const RESULT_EVENT = "linodea:confirm-result";
 
 type ConfirmKind = "quit" | "autostart" | "autostartOff";
 
@@ -97,7 +95,7 @@ export function ConfirmPage() {
   }, [kind, strings]);
 
   function resolve(confirmed: boolean) {
-    if (kind) void emit(RESULT_EVENT, { kind, confirmed });
+    if (kind) void emit(CONFIRM_RESULT_EVENT, { kind, confirmed });
     setKind(null);
     void invoke("dismiss_confirm").catch(() => undefined);
   }

@@ -21,27 +21,21 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import "./App.css";
+import { useAppSettings } from "./model/useAppSettings";
 import {
   enableReminderNotifications,
   startReminderNotificationScheduler,
   type ReminderNotificationScheduler,
 } from "@/entities/reminder";
-import { useAiAssist } from "@/features/ai-assist";
-import { useAppUpdate } from "@/features/app-update";
-import { useLanguage } from "@/features/language";
-import { usePrealerts } from "@/features/prealerts";
-import { useAutostart } from "@/features/startup";
-import { useTheme } from "@/features/theme";
 import { CapturePage } from "@/pages/capture";
 import { ChainPage } from "@/pages/chain";
 import { ListPage } from "@/pages/list";
 import { SettingsPage } from "@/pages/settings";
-import { stringsFor } from "@/shared/i18n";
-import type { SettingsBundle } from "@/shared/settings";
+import { CONFIRM_RESULT_EVENT, MODE_EVENT } from "@/shared/config";
 import { isTauriRuntime } from "@/shared/lib";
 import {
   PopupMenu,
@@ -49,8 +43,6 @@ import {
   type MenuAnchor,
 } from "@/widgets/popup-menu";
 
-const MODE_EVENT = "linodea:mode";
-const CONFIRM_RESULT_EVENT = "linodea:confirm-result";
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
 type Mode = "capture" | "list" | "chain" | "settings";
@@ -69,44 +61,14 @@ function App() {
   // relaunches (landing in capture, not the list) sees they have missed items.
   const [missedCount, setMissedCount] = useState(0);
 
-  const [theme, setTheme] = useTheme();
-  const [language, setLanguage] = useLanguage();
-  const [prealertConfig, setPrealertConfig] = usePrealerts();
-  const [autostart, setAutostart] = useAutostart();
-  const aiAssist = useAiAssist();
-  // Owns its own background check + download. Nothing here drives it; App only
-  // reads "ready" to badge the ••• button, and the Settings panel does the rest.
-  const appUpdate = useAppUpdate();
-  const updateReady = appUpdate.state.phase === "ready";
-
-  const strings = useMemo(() => stringsFor(language), [language]);
-
-  // Build the bundle once per state change so SettingsPage gets a stable
-  // reference per render and the registry can render each section uniformly.
-  const settingsBundle = useMemo<SettingsBundle>(
-    () => ({
-      strings,
-      theme: { value: theme, set: setTheme },
-      language: { value: language, set: setLanguage },
-      prealerts: { value: prealertConfig, set: setPrealertConfig },
-      autostart: { value: autostart, set: setAutostart },
-      aiAssist,
-      appUpdate,
-    }),
-    [
-      strings,
-      theme,
-      setTheme,
-      language,
-      setLanguage,
-      prealertConfig,
-      setPrealertConfig,
-      autostart,
-      setAutostart,
-      aiAssist,
-      appUpdate,
-    ],
-  );
+  const {
+    bundle: settingsBundle,
+    strings,
+    language,
+    aiAssist,
+    setAutostart,
+    updateReady,
+  } = useAppSettings();
 
   // Apply a scheduler pass's result: update the missed badge, and if the pass
   // just moved reminders into `missed`, bump the list refresh signal. Marking
