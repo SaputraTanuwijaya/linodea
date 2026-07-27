@@ -53,6 +53,8 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 
 - `8am`, `8:30pm`
 - `jam 7 pagi`, `jam 19`
+- The `jam` keyword is **optional** when a time-of-day marker follows the number: `besok 7 pagi`, `3 sore`, `8 malam`. The marker is the whole guard — a bare number is never a time (`besok 7 bangun tidur` does not schedule).
+- Markers map per marker, not by one shared rule: **pagi** ≈ 00–11 (`12 pagi` = midnight); **siang** ≈ 10–15, so 10/11/12 are kept and 1–5 shift (`11 siang` = 11:00, `1 siang` = 13:00); **sore** always shifts (`3 sore` = 15:00); **malam** spans midnight — 6–11 shift, `12 malam` = 00:00, and 1–5 stay as small hours (`2 malam` = 02:00).
 - Bare 24-hour `19:00` — recognized with or without a date word. Time-only resolves to **today** if the time is still ahead, otherwise **tomorrow** (you can't schedule into the past). The pattern is strict (`16:9`, `2:5`, `16:90` don't match); separator is `:` only.
 
 ### Recurrence

@@ -1157,6 +1157,28 @@ function findClockTime(
     };
   }
 
+  // Indonesian time-of-day WITHOUT the `jam` keyword: `besok 7 pagi`, `3 sore`.
+  // Dropping `jam` is completely ordinary in real usage — this gap made
+  // `besok 7 pagi bangun tidur` fail to schedule at all. The marker word is the
+  // guard: a bare number on its own is never read as a time, so this only fires
+  // when `pagi/siang/sore/malam` immediately follows the number. Checked after
+  // the `jam` form above, which already covers `jam 7 pagi`.
+  const markerOnly =
+    /\b(\d{1,2})(?::(\d{2}))?\s+(pagi|siang|sore|malam)\b/i.exec(input);
+  if (markerOnly?.index !== undefined) {
+    return {
+      parts: toIndonesianTime(
+        Number(markerOnly[1]),
+        Number(markerOnly[2] ?? 0),
+        markerOnly[3].toLowerCase(),
+      ),
+      segment: {
+        start: markerOnly.index,
+        end: markerOnly.index + markerOnly[0].length,
+      },
+    };
+  }
+
   // Bare 24-hour time (`19:00`) — recognized with or without a date word. The
   // pattern is strict (`16:9`, `2:5`, `16:90` don't match), so the false-match
   // risk is low. Time-only resolves to today, or tomorrow if already past.
@@ -1585,17 +1607,40 @@ function toTwelveHourTime(hour: number, minute: number, meridiem: string): TimeP
   };
 }
 
+/**
+ * Map an Indonesian clock hour onto 24h using its time-of-day marker.
+ *
+ * `siang`, `sore` and `malam` used to share one rule — `hour < 12 → +12` —
+ * which is wrong at each marker's edges: `jam 11 siang` became 23:00, `jam 12
+ * malam` became noon instead of midnight, and `jam 1 malam` became 13:00. Each
+ * marker covers a different span, so each gets its own rule.
+ */
 function toIndonesianTime(
   hour: number,
   minute: number,
   marker?: string,
 ): TimeParts {
+  // pagi ≈ 00:00–11:00. "jam 12 pagi" is midnight.
   if (marker === "pagi") {
     return { hour: hour === 12 ? 0 : hour, minute };
   }
 
-  if (marker === "siang" || marker === "sore" || marker === "malam") {
+  // siang ≈ 10:00–15:00, so 10/11/12 are already correct and only the small
+  // hours shift (1 siang = 13:00).
+  if (marker === "siang") {
+    return { hour: hour >= 10 && hour <= 12 ? hour : hour + 12, minute };
+  }
+
+  // sore ≈ 15:00–18:00 — every spoken hour is a PM one.
+  if (marker === "sore") {
     return { hour: hour < 12 ? hour + 12 : hour, minute };
+  }
+
+  // malam spans midnight: 6–11 are evening (+12), 12 is midnight, and 1–5 are
+  // already the small hours of the morning ("jam 2 malam" = 02:00).
+  if (marker === "malam") {
+    if (hour === 12) return { hour: 0, minute };
+    return { hour: hour >= 6 && hour < 12 ? hour + 12 : hour, minute };
   }
 
   return { hour, minute };

@@ -612,6 +612,56 @@ test("addRecurrenceInterval monthly clamps the day to month length", () => {
   );
 });
 
+// --- Indonesian time-of-day without the `jam` keyword ---
+//
+// Reported from real use: "Besok 7 pagi bangun tidur" would not save at all.
+// The clock matcher required a literal `jam`, so no time was found, the capture
+// bar refused the input and only flashed its error cue.
+
+test("an Indonesian marker time parses without the jam keyword", () => {
+  const result = parseReminderWithNow("Besok 7 pagi bangun tidur", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-23T00:00:00.000Z"); // 07:00 WIB
+  assert.equal(result.draft.title, "bangun tidur");
+  assert.deepEqual(result.issues, []);
+});
+
+test("a tag does not interfere with a jam-less marker time", () => {
+  const result = parseReminderWithNow("#School Besok 7 pagi bangun tidur", options);
+
+  assert.equal(result.draft.scheduledAt, "2026-05-23T00:00:00.000Z");
+  assert.equal(result.draft.title, "bangun tidur");
+  assert.deepEqual(result.draft.tags, ["school"]);
+});
+
+test("a bare number with no marker is still not a time", () => {
+  // The marker word is the only thing licensing this form — without it, `7`
+  // must stay an ordinary title word.
+  const result = parseReminderWithNow("besok 7 bangun tidur", options);
+
+  assert.equal(result.draft.scheduledAt, undefined);
+  assert.equal(result.issues[0]?.code, "missing_time");
+});
+
+// Each marker covers a different span; they used to share one `hour < 12 → +12`
+// rule, which put `11 siang` at 23:00 and `12 malam` at noon.
+for (const { input, wib } of [
+  { input: "besok jam 11 siang rapat", wib: "04:00" }, // 11:00 WIB
+  { input: "besok jam 10 siang rapat", wib: "03:00" }, // 10:00 WIB
+  { input: "besok jam 1 siang rapat", wib: "06:00" }, // 13:00 WIB
+  { input: "besok jam 12 malam rapat", wib: "17:00" }, // 00:00 WIB (midnight)
+  { input: "besok jam 2 malam rapat", wib: "19:00" }, // 02:00 WIB
+  { input: "besok jam 8 malam rapat", wib: "13:00" }, // 20:00 WIB
+  { input: "besok jam 3 sore rapat", wib: "08:00" }, // 15:00 WIB
+  { input: "besok jam 7 pagi rapat", wib: "00:00" }, // 07:00 WIB
+]) {
+  test(`Indonesian marker maps to the right hour: ${input}`, () => {
+    const result = parseReminderWithNow(input, options);
+    assert.ok(result.draft.scheduledAt, `${input} should schedule`);
+    assert.equal(result.draft.scheduledAt.slice(11, 16), wib);
+  });
+}
+
 // --- Tags (`#tag`), which replaced keyword categorization ---
 //
 // The old categorizer guessed one of six fixed categories from ~90 keywords.

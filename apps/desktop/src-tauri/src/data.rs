@@ -907,17 +907,46 @@ impl ReminderStore {
             )
             .map_err(to_store_error)?;
 
-        // v4: `category` → `tags_json`. Deliberately NO `ALTER TABLE` backfill:
-        // this landed pre-launch with exactly one database in existence (the
-        // author's dev install), so a pre-v4 DB is expected to be deleted rather
-        // than migrated. `backup_before_upgrade` still snapshots it first,
-        // because CURRENT_SCHEMA_VERSION moved ahead of it.
-        //
-        // If a future change ever does need to reshape a *shipped* DB, follow the
-        // v2 pattern above instead: a `column_exists` guard plus `ALTER TABLE`.
-        // That style is state-based — it inspects the DB rather than trusting a
-        // version number — so a user jumping several releases at once cannot skip
-        // it, which an ordered list of per-version deltas could.
+        // v4: `category` → `tags_json`, following the same state-based pattern as
+        // v2 — guarded by what the table actually contains, never by the recorded
+        // version. This shipped marker-only at first (base SCHEMA + an unversioned
+        // marker) which did nothing at all: `CREATE TABLE IF NOT EXISTS` is a
+        // no-op on an existing table, so a real v3 DB kept its `category` column,
+        // gained no `tags_json`, and still recorded version 4 — claiming to be
+        // migrated while every query referencing `tags_json` failed. Because the
+        // guards below read the schema rather than the marker, such a DB heals
+        // itself on the next open.
+        if !self.column_exists("reminder_nodes", "tags_json")? {
+            self.connection
+                .execute(
+                    "ALTER TABLE reminder_nodes ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'",
+                    [],
+                )
+                .map_err(to_store_error)?;
+        }
+
+        // Carry a real old category across as the reminder's first tag. The old
+        // values were auto-guesses, but a guess the user kept beats dropping it;
+        // `uncategorized` carries nothing because it never meant anything.
+        // Runs only while both columns coexist, so it can't fire twice.
+        if self.column_exists("reminder_nodes", "category")? {
+            self.connection
+                .execute(
+                    r#"
+                    UPDATE reminder_nodes
+                    SET tags_json = '["' || category || '"]'
+                    WHERE tags_json = '[]' AND category <> 'uncategorized'
+                    "#,
+                    [],
+                )
+                .map_err(to_store_error)?;
+            // DROP COLUMN needs SQLite >= 3.35; libsqlite3-sys bundles well past
+            // that. It is allowed here despite the column's CHECK constraint.
+            self.connection
+                .execute("ALTER TABLE reminder_nodes DROP COLUMN category", [])
+                .map_err(to_store_error)?;
+        }
+
         self.connection
             .execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
@@ -1822,6 +1851,95 @@ mod tests {
         assert_eq!(reminders.len(), 1);
         assert_eq!(reminders[0].id, "legacy-1");
         assert!(reminders[0].recurrence.is_none());
+    }
+
+    #[test]
+    fn heals_a_db_left_half_migrated_by_the_marker_only_v4() {
+        // The first v4 shipped as a marker with no ALTER, so a real v3 DB kept
+        // `category`, never gained `tags_json`, and still recorded version 4 —
+        // it *claimed* to be migrated while every query failed. Reproduce that
+        // exact state and prove the state-based guards heal it, marker and all.
+        let connection = Connection::open_in_memory().expect("opens");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                  version INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                );
+                CREATE TABLE reminder_nodes (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT,
+                  title TEXT NOT NULL,
+                  raw_input TEXT NOT NULL,
+                  description TEXT,
+                  scheduled_at TEXT NOT NULL,
+                  timezone TEXT NOT NULL,
+                  reminder_type TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  category TEXT NOT NULL CHECK (
+                    category IN ('university', 'investing', 'personal',
+                                 'tutoring', 'urgent', 'waiting', 'uncategorized')
+                  ),
+                  parent_id TEXT,
+                  previous_id TEXT,
+                  next_id TEXT,
+                  checklist_json TEXT NOT NULL,
+                  recurrence_json TEXT,
+                  confidence REAL NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  completed_at TEXT,
+                  snoozed_until TEXT,
+                  created_on_device_id TEXT NOT NULL,
+                  sync_version INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO schema_migrations (version, name) VALUES
+                  (1, 'base_reminder_nodes'), (2, 'add_recurrence'),
+                  (3, 'add_reminder_fire_state'), (4, 'replace_category_with_tags');
+                INSERT INTO reminder_nodes (
+                  id, title, raw_input, scheduled_at, timezone, reminder_type, status,
+                  category, checklist_json, confidence, created_at, updated_at,
+                  created_on_device_id, sync_version
+                ) VALUES
+                  ('kept', 'Biology project', 'deadline biology project',
+                   '2026-05-22T12:30:00.000Z', 'Asia/Jakarta', 'deadline', 'pending',
+                   'uncategorized', '[]', 0.9, '2026-05-22T12:00:00.000Z',
+                   '2026-05-22T12:00:00.000Z', 'device-1', 0),
+                  ('tagged', 'Read chapter 3', 'besok jam 8 read chapter 3',
+                   '2026-05-22T13:30:00.000Z', 'Asia/Jakarta', 'main', 'pending',
+                   'university', '[]', 0.9, '2026-05-22T12:00:00.000Z',
+                   '2026-05-22T12:00:00.000Z', 'device-1', 0);
+                "#,
+            )
+            .expect("half-migrated schema seeded");
+
+        let store = ReminderStore {
+            connection,
+            database_path: PathBuf::from(":memory:"),
+        };
+        // Precondition: the marker lies.
+        assert_eq!(store.schema_version().expect("version"), 4);
+        assert!(!store.column_exists("reminder_nodes", "tags_json").unwrap());
+        assert!(store.column_exists("reminder_nodes", "category").unwrap());
+
+        store.migrate().expect("migration heals the DB");
+
+        assert!(store.column_exists("reminder_nodes", "tags_json").unwrap());
+        assert!(!store.column_exists("reminder_nodes", "category").unwrap());
+
+        let mut reminders = store.list_reminders().expect("rows still load");
+        reminders.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(reminders.len(), 2);
+        // A real old category is carried across as the first tag...
+        assert_eq!(reminders[1].tags, vec!["university"]);
+        // ...but `uncategorized` never meant anything, so it carries nothing.
+        assert!(reminders[0].tags.is_empty());
+
+        // Idempotent: a second open must be a clean no-op.
+        store.migrate().expect("second migration is a no-op");
+        assert!(store.column_exists("reminder_nodes", "tags_json").unwrap());
     }
 
     #[test]
