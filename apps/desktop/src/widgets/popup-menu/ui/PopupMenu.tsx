@@ -1,9 +1,10 @@
 /**
  * Right-click / `•••` context menu rendered above the popup.
  *
- * State (open/closed, anchor position) lives in App.tsx because the menu's
- * trigger is the popup shell itself, not this component. PopupMenu is
- * stateless apart from layout clamping.
+ * State (open/closed, anchor position, dismiss rules, action routing) lives in
+ * `../model/usePopupMenu`. This component is stateless apart from layout
+ * clamping — the shell decides whether to render it at all, since the menu is
+ * positioned `fixed` against the window rather than nested in the widget.
  */
 
 import type { RefObject } from "react";

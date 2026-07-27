@@ -1,2 +1,3 @@
-export { PopupMenu } from "./PopupMenu";
-export type { MenuAction, MenuAnchor, PopupMenuMode } from "./PopupMenu";
+export { PopupMenu } from "./ui/PopupMenu";
+export type { MenuAction, MenuAnchor, PopupMenuMode } from "./ui/PopupMenu";
+export { usePopupMenu } from "./model/usePopupMenu";

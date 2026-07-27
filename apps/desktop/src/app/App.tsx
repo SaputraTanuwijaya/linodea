@@ -19,10 +19,8 @@
  * registry entry — never a JSX block here.
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
 
 import "./App.css";
 import { useAppSettings } from "./model/useAppSettings";
@@ -38,24 +36,16 @@ import { ListPage } from "@/pages/list";
 import { SettingsPage } from "@/pages/settings";
 import { MODE_EVENT } from "@/shared/config";
 import { isTauriRuntime } from "@/shared/lib";
-import {
-  PopupMenu,
-  type MenuAction,
-  type MenuAnchor,
-} from "@/widgets/popup-menu";
-
-const CAPTURE_WITH_MENU_HEIGHT = 300;
+import { PopupMenu, usePopupMenu } from "@/widgets/popup-menu";
 
 type Mode = "capture" | "list" | "chain" | "settings";
 
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
 
   const [mode, setMode] = useState<Mode>("capture");
   const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
-  const [menuAnchor, setMenuAnchor] = useState<MenuAnchor | null>(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
   // Count of reminders sitting in the `missed` state, read from each scheduler
   // sync. Surfaced as a badge on the capture bar's menu button so a user who
@@ -70,6 +60,8 @@ function App() {
     setAutostart,
     updateReady,
   } = useAppSettings();
+
+  const menu = usePopupMenu(mode);
 
   useConfirmResultRouting(setAutostart);
 
@@ -110,7 +102,9 @@ function App() {
       const parsed = parseMode(event.payload);
       setMode(parsed.mode);
       setSettingsFocus(parsed.settingsSection);
-      setMenuAnchor(null);
+      // A mode change always dismisses an open menu — including a same-mode
+      // event (the tray can re-issue the mode you're already in).
+      menu.close();
     }).then((fn) => {
       if (mounted) {
         unlisten = fn;
@@ -180,86 +174,6 @@ function App() {
     void schedulerRef.current?.sync().then(applySyncResult);
   }, [mode, applySyncResult]);
 
-  // --- Menu lifecycle ------------------------------------------------------
-
-  useEffect(() => {
-    if (!menuAnchor) return;
-
-    function onMouseDown(event: globalThis.MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuAnchor(null);
-      }
-    }
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setMenuAnchor(null);
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [menuAnchor]);
-
-  async function openMenuAt(x: number, y: number) {
-    if (mode === "capture" && isTauriRuntime()) {
-      await invoke("set_popup_height", { height: CAPTURE_WITH_MENU_HEIGHT })
-        .catch(() => undefined);
-    }
-    setMenuAnchor({ x, y });
-  }
-
-  function handleContextMenu(event: ReactMouseEvent) {
-    event.preventDefault();
-    void openMenuAt(event.clientX, event.clientY);
-  }
-
-  function handleMenuButtonClick(event: ReactMouseEvent) {
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    void openMenuAt(rect.left, rect.bottom + 4);
-  }
-
-  // Quitting stops all reminders (they only fire while the app runs), so gate it
-  // behind the themed confirm window. The tray Quit item shows the same window
-  // from Rust; both resolve via the `linodea:confirm-result` listener above.
-  function requestQuit() {
-    setMenuAnchor(null);
-    void invoke("show_confirm", { payload: { kind: "quit" } }).catch(
-      () => undefined,
-    );
-  }
-
-  async function handleMenuAction(action: MenuAction) {
-    setMenuAnchor(null);
-    if (!isTauriRuntime()) return;
-    try {
-      switch (action) {
-        case "capture":
-          await invoke("enter_capture_mode");
-          break;
-        case "list":
-          await invoke("enter_list_mode");
-          break;
-        case "chain":
-          await invoke("enter_chain_mode");
-          break;
-        case "settings":
-          await invoke("enter_settings_mode");
-          break;
-        case "hide":
-          await invoke("hide_main_window");
-          break;
-        case "quit":
-          requestQuit();
-          break;
-      }
-    } catch {
-      // Silent.
-    }
-  }
-
   // --- Render -------------------------------------------------------------
 
   // Popup z-scale (all inside the single main window). The capture bar and each
@@ -272,7 +186,7 @@ function App() {
   //   floating menus (••• / context menu)  z-50 (fixed; top layer)
   return (
     <main className="flex h-screen w-screen items-start justify-center bg-transparent pt-3">
-      <div className="relative w-[560px]" onContextMenu={handleContextMenu}>
+      <div className="relative w-[560px]" onContextMenu={menu.handleContextMenu}>
         {mode !== "settings" ? (
           <>
             <img
@@ -287,7 +201,7 @@ function App() {
               inputRef={inputRef}
               language={language}
               missedCount={missedCount}
-              onMenuButtonClick={handleMenuButtonClick}
+              onMenuButtonClick={menu.handleMenuButtonClick}
               updateReady={updateReady}
               onSaved={() => {
                 setListRefreshKey((k) => k + 1);
@@ -320,13 +234,13 @@ function App() {
         ) : null}
       </div>
 
-      {menuAnchor ? (
+      {menu.anchor ? (
         <PopupMenu
-          anchor={menuAnchor}
-          menuRef={menuRef}
+          anchor={menu.anchor}
+          menuRef={menu.menuRef}
           missedCount={missedCount}
           mode={mode}
-          onAction={handleMenuAction}
+          onAction={menu.handleAction}
           strings={strings}
           updateReady={updateReady}
         />
