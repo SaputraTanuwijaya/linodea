@@ -26,6 +26,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 
 import "./App.css";
 import { useAppSettings } from "./model/useAppSettings";
+import { useConfirmResultRouting } from "./model/useConfirmResultRouting";
 import {
   enableReminderNotifications,
   startReminderNotificationScheduler,
@@ -35,7 +36,7 @@ import { CapturePage } from "@/pages/capture";
 import { ChainPage } from "@/pages/chain";
 import { ListPage } from "@/pages/list";
 import { SettingsPage } from "@/pages/settings";
-import { CONFIRM_RESULT_EVENT, MODE_EVENT } from "@/shared/config";
+import { MODE_EVENT } from "@/shared/config";
 import { isTauriRuntime } from "@/shared/lib";
 import {
   PopupMenu,
@@ -69,6 +70,8 @@ function App() {
     setAutostart,
     updateReady,
   } = useAppSettings();
+
+  useConfirmResultRouting(setAutostart);
 
   // Apply a scheduler pass's result: update the missed badge, and if the pass
   // just moved reminders into `missed`, bump the list refresh signal. Marking
@@ -109,48 +112,6 @@ function App() {
       setSettingsFocus(parsed.settingsSection);
       setMenuAnchor(null);
     }).then((fn) => {
-      if (mounted) {
-        unlisten = fn;
-      } else {
-        fn();
-      }
-    });
-
-    return () => {
-      mounted = false;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-
-    // The themed confirm window (quit / autostart / update) reports the user's
-    // choice here; the action lives in the main window that owns the state.
-    void listen<{ kind: string; confirmed: boolean }>(
-      CONFIRM_RESULT_EVENT,
-      (event) => {
-        const { kind, confirmed } = event.payload;
-        if (kind === "quit") {
-          if (confirmed) void invoke("quit_app").catch(() => undefined);
-        } else if (kind === "autostart") {
-          // Persist "answered" in Rust so the prompt isn't shown again, apply the
-          // choice, then surface the capture bar so first-run lands in the app
-          // (the main window was hidden while the prompt was up).
-          void invoke("mark_boot_prompt_answered").catch(() => undefined);
-          void setAutostart(confirmed);
-          void invoke("enter_capture_mode").catch(() => undefined);
-        } else if (kind === "autostartOff") {
-          // Confirming means "yes, turn it off". The confirm window stole focus
-          // and hid Settings, so reopen Settings to show the toggle's new state.
-          if (confirmed) void setAutostart(false);
-          void invoke("enter_settings_mode").catch(() => undefined);
-        }
-      },
-    ).then((fn) => {
       if (mounted) {
         unlisten = fn;
       } else {
