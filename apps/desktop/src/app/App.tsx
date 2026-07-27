@@ -19,12 +19,12 @@
  * registry entry — never a JSX block here.
  */
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import "./App.css";
 import { useAppSettings } from "./model/useAppSettings";
 import { useConfirmResultRouting } from "./model/useConfirmResultRouting";
+import { useMode } from "./model/useMode";
 import {
   enableReminderNotifications,
   startReminderNotificationScheduler,
@@ -34,18 +34,14 @@ import { CapturePage } from "@/pages/capture";
 import { ChainPage } from "@/pages/chain";
 import { ListPage } from "@/pages/list";
 import { SettingsPage } from "@/pages/settings";
-import { MODE_EVENT } from "@/shared/config";
 import { isTauriRuntime } from "@/shared/lib";
 import { PopupMenu, usePopupMenu } from "@/widgets/popup-menu";
-
-type Mode = "capture" | "list" | "chain" | "settings";
 
 function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const schedulerRef = useRef<ReminderNotificationScheduler | null>(null);
 
-  const [mode, setMode] = useState<Mode>("capture");
-  const [settingsFocus, setSettingsFocus] = useState<string | null>(null);
+  const { mode, settingsFocus, modeEpoch } = useMode();
   const [listRefreshKey, setListRefreshKey] = useState(0);
   // Count of reminders sitting in the `missed` state, read from each scheduler
   // sync. Surfaced as a badge on the capture bar's menu button so a user who
@@ -61,7 +57,7 @@ function App() {
     updateReady,
   } = useAppSettings();
 
-  const menu = usePopupMenu(mode);
+  const menu = usePopupMenu(mode, modeEpoch);
 
   useConfirmResultRouting(setAutostart);
 
@@ -90,34 +86,6 @@ function App() {
   // desktop::prompt_launch_on_boot). It used to fire from a hidden-window
   // setTimeout here, but WebView2 throttles timers in the hidden main window, so
   // it fired unreliably. Rust owns the trigger + the answered marker now.
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-
-    void listen<string>(MODE_EVENT, (event) => {
-      if (!mounted) return;
-      const parsed = parseMode(event.payload);
-      setMode(parsed.mode);
-      setSettingsFocus(parsed.settingsSection);
-      // A mode change always dismisses an open menu — including a same-mode
-      // event (the tray can re-issue the mode you're already in).
-      menu.close();
-    }).then((fn) => {
-      if (mounted) {
-        unlisten = fn;
-      } else {
-        fn();
-      }
-    });
-
-    return () => {
-      mounted = false;
-      unlisten?.();
-    };
-  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -247,19 +215,6 @@ function App() {
       ) : null}
     </main>
   );
-}
-
-function parseMode(payload: string): {
-  mode: Mode;
-  settingsSection: string | null;
-} {
-  if (payload === "list") return { mode: "list", settingsSection: null };
-  if (payload === "chain") return { mode: "chain", settingsSection: null };
-  if (payload.startsWith("settings")) {
-    const section = payload.split(":", 2)[1] ?? null;
-    return { mode: "settings", settingsSection: section };
-  }
-  return { mode: "capture", settingsSection: null };
 }
 
 export default App;

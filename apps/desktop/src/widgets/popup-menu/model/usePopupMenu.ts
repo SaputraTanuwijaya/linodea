@@ -25,11 +25,23 @@ import type { MenuAction, MenuAnchor, PopupMenuMode } from "../ui/PopupMenu";
  */
 const CAPTURE_WITH_MENU_HEIGHT = 300;
 
-export function usePopupMenu(mode: PopupMenuMode) {
+/**
+ * @param mode          current popup mode; only capture needs the window grown.
+ * @param dismissSignal any value that changes when the user navigates. The menu
+ *                      closes whenever it changes. Callers pass a mode *event*
+ *                      counter rather than `mode` itself, so a repeat of the
+ *                      mode you're already in (the tray can issue one) still
+ *                      dismisses the menu.
+ */
+export function usePopupMenu(mode: PopupMenuMode, dismissSignal?: unknown) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
 
   const close = useCallback(() => setAnchor(null), []);
+
+  useEffect(() => {
+    setAnchor(null);
+  }, [dismissSignal]);
 
   useEffect(() => {
     if (!anchor) return;
