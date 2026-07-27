@@ -151,7 +151,7 @@ export function ListPage({
         scheduledAt,
         timezone: parsed.draft.timezone,
         type: parsed.draft.type,
-        category: parsed.draft.category,
+        tags: parsed.draft.tags,
         checklist: parsed.draft.checklist,
         recurrence: parsed.draft.recurrence,
         updatedAt: new Date().toISOString(),

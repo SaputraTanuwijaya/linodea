@@ -22,7 +22,7 @@ test("parses English tomorrow clock time with checklist", () => {
   assert.equal(result.draft.scheduledAt, "2026-05-23T01:00:00.000Z");
   assert.equal(result.draft.timezone, "Asia/Jakarta");
   assert.equal(result.draft.type, "main");
-  assert.equal(result.draft.category, "university");
+  assert.deepEqual(result.draft.tags, []);
   assert.deepEqual(result.draft.checklist, ["laptop", "charger", "KTM"]);
   assert.deepEqual(result.issues, []);
 });
@@ -41,7 +41,7 @@ test("parses Indonesian relative hours", () => {
 
   assert.equal(result.draft.title, "submit form");
   assert.equal(result.draft.scheduledAt, "2026-05-21T20:00:00.000Z");
-  assert.equal(result.draft.category, "uncategorized");
+  assert.deepEqual(result.draft.tags, []);
 });
 
 test("parses Indonesian date and clock marker", () => {
@@ -52,7 +52,7 @@ test("parses Indonesian date and clock marker", () => {
 
   assert.equal(result.draft.title, "les privat Kevin");
   assert.equal(result.draft.scheduledAt, "2026-05-23T00:00:00.000Z");
-  assert.equal(result.draft.category, "tutoring");
+  assert.deepEqual(result.draft.tags, []);
   assert.deepEqual(result.draft.checklist, ["soal", "aljabar"]);
 });
 
@@ -61,7 +61,7 @@ test("marks H-1 reminders as prep without inventing a time", () => {
 
   assert.equal(result.draft.title, "presentation review slides");
   assert.equal(result.draft.type, "prep");
-  assert.equal(result.draft.category, "university");
+  assert.deepEqual(result.draft.tags, []);
   assert.equal(result.draft.scheduledAt, undefined);
   assert.equal(result.issues[0]?.code, "missing_time");
   assert.equal(result.issues[1]?.code, "low_confidence");
@@ -86,7 +86,7 @@ test("autocorrects a typo in an Indonesian date word (besko -> besok)", () => {
   assert.equal(result.draft.title, "les privat Kevin");
   // Same scheduledAt as the clean "besok jam 7 pagi" fixture above.
   assert.equal(result.draft.scheduledAt, "2026-05-23T00:00:00.000Z");
-  assert.equal(result.draft.category, "tutoring");
+  assert.deepEqual(result.draft.tags, []);
 
   const autocorrect = result.issues.find((i) => i.code === "autocorrect");
   assert.ok(autocorrect, "expected an autocorrect issue");
@@ -161,7 +161,7 @@ test("autocorrects an Indonesian morning time marker typo (pagy -> pagi)", () =>
   assert.equal(result.draft.title, "lab session");
   // pagi keeps 8 -> 08:00 WIB == 01:00 UTC (same as clean "jam 8" morning).
   assert.equal(result.draft.scheduledAt, "2026-05-23T01:00:00.000Z");
-  assert.equal(result.draft.category, "university");
+  assert.deepEqual(result.draft.tags, []);
 
   const autocorrect = result.issues.find(
     (i) => i.code === "autocorrect" && i.corrected === "pagi",
@@ -366,6 +366,64 @@ test("absolute calendar date without time needs a clock time", () => {
   assert.equal(result.issues[0].code, "missing_time");
 });
 
+// A 24-hour clock next to a day-month date used to be misread as the day:
+// `30 August 13:00` scheduled August *13* because month+day was tried first and
+// the hour satisfied its day slot. A wrong-but-scheduled date is the worst
+// failure mode, so each shape is pinned.
+for (const { input, scheduledAt, title } of [
+  {
+    input: "30 August 13:00 thesis discussion with Sir John",
+    scheduledAt: "2026-08-30T06:00:00.000Z",
+    title: "thesis discussion with Sir John",
+  },
+  {
+    input: "28 July 10:30 sync",
+    scheduledAt: "2026-07-28T03:30:00.000Z",
+    title: "sync",
+  },
+  {
+    input: "28 Juli 09:00 rapat tim",
+    scheduledAt: "2026-07-28T02:00:00.000Z",
+    title: "rapat tim",
+  },
+  {
+    input: "tanggal 28 Juli 13:00 rapat tim",
+    scheduledAt: "2026-07-28T06:00:00.000Z",
+    title: "rapat tim",
+  },
+  {
+    input: "5 Juni 19:00 makan malam",
+    scheduledAt: "2026-06-05T12:00:00.000Z",
+    title: "makan malam",
+  },
+  // Month-first with a 24-hour clock must keep working — the clock sits outside
+  // the date, so nothing is dropped.
+  {
+    input: "August 30 13:00 sync",
+    scheduledAt: "2026-08-30T06:00:00.000Z",
+    title: "sync",
+  },
+  // `10AM` never hit this bug (the day slot's word boundary already refused it),
+  // but pin it so the guard can't regress the am/pm path.
+  {
+    input: "28 July 10AM messages",
+    scheduledAt: "2026-07-28T03:00:00.000Z",
+    title: "messages",
+  },
+  {
+    input: "28 July 2026 13:00 sync",
+    scheduledAt: "2026-07-28T06:00:00.000Z",
+    title: "sync",
+  },
+]) {
+  test(`day-month date keeps its day next to a clock time: ${input}`, () => {
+    const result = parseReminderWithNow(input, options);
+
+    assert.equal(result.draft.scheduledAt, scheduledAt);
+    assert.equal(result.draft.title, title);
+  });
+}
+
 for (const phrase of [
   "buy 2 apples",
   "run 5 miles",
@@ -554,41 +612,91 @@ test("addRecurrenceInterval monthly clamps the day to month length", () => {
   );
 });
 
-// --- Category detection v1.2 (expanded vocabularies + fuzzy fallback) ---
+// --- Tags (`#tag`), which replaced keyword categorization ---
+//
+// The old categorizer guessed one of six fixed categories from ~90 keywords.
+// These pin the replacement: pure extraction of what the user typed, no fuzzy,
+// stripped from the title.
 
-test("categorizes from an expanded Indonesian university keyword (tugas)", () => {
-  const result = parseReminderWithNow("besok jam 9 kumpulin tugas statistika", options);
-
-  assert.equal(result.draft.category, "university");
-  // Exact keyword match emits no autocorrect noise.
-  assert.equal(result.issues.filter((i) => i.code === "autocorrect").length, 0);
-});
-
-test("categorizes from an expanded Indonesian investing keyword (dividen)", () => {
-  const result = parseReminderWithNow("jumat cek dividen reksadana", options);
-
-  assert.equal(result.draft.category, "investing");
-});
-
-test("fuzzy-categorizes a typo'd keyword and surfaces an autocorrect (sahm -> saham)", () => {
-  const result = parseReminderWithNow("besok jam 8 review sahm BBCA", options);
-
-  assert.equal(result.draft.category, "investing");
-  const autocorrect = result.issues.find(
-    (i) => i.code === "autocorrect" && i.corrected === "saham",
+test("extracts a tag and strips it from the title", () => {
+  const result = parseReminderWithNow(
+    "30 August 13:00 thesis discussion with Sir John #skripsi",
+    options,
   );
-  assert.ok(autocorrect, "expected an autocorrect issue for sahm -> saham");
-  assert.equal(autocorrect.original.toLowerCase(), "sahm");
-  assert.equal(autocorrect.distance, 1);
+
+  assert.deepEqual(result.draft.tags, ["skripsi"]);
+  assert.equal(result.draft.title, "thesis discussion with Sir John");
 });
 
-test("a near-miss everyday word is not mis-categorized (form !-> a category)", () => {
-  // "form" sits one edit from several plausible keywords; the distance-1 fuzzy
-  // fallback must not pull it into a category. (Guards the dropped "dorm" case.)
-  const result = parseReminderWithNow("2 jam lagi submit form", options);
+test("extracts several tags, lowercased and deduped, in typed order", () => {
+  const result = parseReminderWithNow(
+    "besok jam 8 rapat tim #Kerja #urgent #kerja",
+    options,
+  );
 
-  assert.equal(result.draft.category, "uncategorized");
-  assert.equal(result.issues.filter((i) => i.code === "autocorrect").length, 0);
+  assert.deepEqual(result.draft.tags, ["kerja", "urgent"]);
+  assert.equal(result.draft.title, "rapat tim");
+});
+
+test("a leading tag still leaves a clean title", () => {
+  const result = parseReminderWithNow("#kuliah besok jam 7 kelas pagi", options);
+
+  assert.deepEqual(result.draft.tags, ["kuliah"]);
+  assert.equal(result.draft.title, "kelas pagi");
+});
+
+test("tags survive alongside a checklist without swallowing an item", () => {
+  const result = parseReminderWithNow(
+    "besok jam 8 lab session bring laptop dan charger #kampus",
+    options,
+  );
+
+  assert.deepEqual(result.draft.tags, ["kampus"]);
+  assert.deepEqual(result.draft.checklist, ["laptop", "charger"]);
+  assert.equal(result.draft.title, "lab session");
+});
+
+test("hyphens and digits survive inside a tag", () => {
+  const result = parseReminderWithNow("tomorrow 8am review #saham-bbca", options);
+
+  assert.deepEqual(result.draft.tags, ["saham-bbca"]);
+});
+
+test("a #digit is not a tag — it stays in the title", () => {
+  // `#2` in "buy #2 pencil" must not become a tag named "2".
+  const result = parseReminderWithNow("tomorrow 9am buy #2 pencil", options);
+
+  assert.deepEqual(result.draft.tags, []);
+  assert.equal(result.draft.title, "buy #2 pencil");
+});
+
+test("tags are capped, and the overflow stays visible in the title", () => {
+  const result = parseReminderWithNow(
+    "tomorrow 10am sync #a #b #c #d #e #f",
+    options,
+  );
+
+  assert.deepEqual(result.draft.tags, ["a", "b", "c", "d", "e"]);
+  // The cap is not silent — an untagged leftover is a signal, not a swallow.
+  assert.equal(result.draft.title, "sync #f");
+});
+
+test("ordinary keywords no longer produce a tag (no guessing)", () => {
+  // Each of these used to be auto-categorized: tugas -> university,
+  // dividen -> investing, and `sahm` even fuzzy-matched to saham.
+  for (const input of [
+    "besok jam 9 kumpulin tugas statistika",
+    "besok jam 8 cek dividen reksadana",
+    "besok jam 8 review sahm BBCA",
+  ]) {
+    const result = parseReminderWithNow(input, options);
+    assert.deepEqual(result.draft.tags, [], input);
+    assert.equal(
+      result.issues.filter((i) => i.code === "autocorrect").length,
+      0,
+      `${input} should emit no category autocorrect`,
+    );
+  }
 });
 
 // --- /link anchor-relative time (parseAnchorLink) ---

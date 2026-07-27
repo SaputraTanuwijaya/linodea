@@ -119,7 +119,7 @@ function makeReminder(overrides: Partial<ReminderNode> = {}): ReminderNode {
     timezone: "Asia/Jakarta",
     type: "main",
     status: "pending",
-    category: "uncategorized",
+    tags: [],
     checklist: [],
     confidence: 1,
     createdAt: iso(-2 * 60 * MIN), // 2h before "now" so prealerts are eligible

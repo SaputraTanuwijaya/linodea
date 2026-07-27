@@ -10,7 +10,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ChainNode,
   Recurrence,
-  ReminderCategory,
   ReminderNode,
   ReminderStatus,
   ReminderType,
@@ -33,7 +32,7 @@ export interface ReminderEditPatch {
   scheduledAt: string;
   timezone: string;
   type: ReminderType;
-  category: ReminderCategory;
+  tags: string[];
   checklist: string[];
   recurrence?: Recurrence;
   updatedAt: string;
@@ -98,15 +97,19 @@ export function moveReminderNode(patch: MovePatch): Promise<ReminderNode> {
   return invoke<ReminderNode>("move_reminder_node", { patch });
 }
 
-/** Change only a reminder's category — the manual correction escape hatch. */
-export interface ReminderCategoryPatch {
+/**
+ * Replace a reminder's tags. An empty array clears them — untagging is a normal
+ * operation, and Rust normalizes whatever arrives (lowercase, dedupe, cap) so
+ * the UI never has to.
+ */
+export interface ReminderTagsPatch {
   id: string;
-  category: ReminderCategory;
+  tags: string[];
   updatedAt: string;
 }
 
-export function setReminderCategory(patch: ReminderCategoryPatch): Promise<ReminderNode> {
-  return invoke<ReminderNode>("set_reminder_node_category", { patch });
+export function setReminderTags(patch: ReminderTagsPatch): Promise<ReminderNode> {
+  return invoke<ReminderNode>("set_reminder_node_tags", { patch });
 }
 
 /**

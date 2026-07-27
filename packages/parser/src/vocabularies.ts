@@ -78,107 +78,18 @@ export const TYPE_COOLDOWN_WORDS: VocabularyEntry[] = [
   ...en("cooldown", "cool down", "cool-off", "cool off"),
 ];
 
-// --- Category vocabularies ---
+// --- Categories: removed ---
 //
-// These were sparse exact-match lists that the categorizer didn't even use
-// (it had a parallel hardcoded regex). They are now the single source the
-// categorizer drives off, exact-then-fuzzy, so expanding them here directly
-// widens real-input coverage. Words are deliberately distinctive: avoid short
-// or generic tokens that collide (under fuzzy distance 1) with everyday title
-// words — e.g. "dorm" was dropped because "form" sits one edit away.
-
-export const CATEGORY_TUTORING: VocabularyEntry[] = [
-  ...id("les", "privat", "bimbel", "ngajar", "mengajar", "murid", "siswa"),
-  ...en("tutor", "tutoring", "tutee"),
-];
-
-export const CATEGORY_UNIVERSITY: VocabularyEntry[] = [
-  ...en(
-    "lab",
-    "class",
-    "campus",
-    "grading",
-    "rubric",
-    "slides",
-    "lecture",
-    "lecturer",
-    "assignment",
-    "exam",
-    "quiz",
-    "seminar",
-    "semester",
-    "syllabus",
-    "presentation",
-  ),
-  ...id(
-    "kelas",
-    "kuliah",
-    "kampus",
-    "ktm",
-    "dosen",
-    "tugas",
-    "ujian",
-    "uts",
-    "uas",
-    "kuis",
-    "skripsi",
-    "praktikum",
-    "mahasiswa",
-    "sks",
-    "krs",
-    "presentasi",
-  ),
-];
-
-export const CATEGORY_INVESTING: VocabularyEntry[] = [
-  ...en(
-    "cpi",
-    "fomc",
-    "earnings",
-    "crypto",
-    "stock",
-    "invest",
-    "thesis",
-    "dividend",
-    "portfolio",
-    "trading",
-    "etf",
-  ),
-  ...id(
-    "saham",
-    "investasi",
-    "dividen",
-    "portofolio",
-    "reksadana",
-    "obligasi",
-    "ihsg",
-    "emiten",
-  ),
-];
-
-export const CATEGORY_URGENT: VocabularyEntry[] = [
-  ...en("urgent", "asap"),
-  ...id("penting", "darurat", "segera", "mendesak"),
-];
-
-export const CATEGORY_WAITING: VocabularyEntry[] = [
-  ...en("waiting", "follow up", "follow-up", "pending"),
-  ...id("menunggu", "nunggu", "konfirmasi"),
-];
-
-export const CATEGORY_PERSONAL: VocabularyEntry[] = [
-  ...en("personal", "home", "family", "doctor", "groceries", "birthday"),
-  ...id(
-    "rumah",
-    "keluarga",
-    "pribadi",
-    "dokter",
-    "obat",
-    "olahraga",
-    "belanja",
-    "ultah",
-  ),
-];
+// Six `CATEGORY_*` vocabularies (~90 keywords) used to live here, driving an
+// exact-then-fuzzy categorizer. They are gone, replaced by user-authored `#tag`
+// tokens the parser only has to *extract* — no guessing. The lists were one
+// person's life (university / investing / tutoring), so 19 of 20 ordinary
+// captures came back uncategorized, and when a keyword did hit it could be
+// confidently wrong: `thesis` sat in the investing list (an *investment*
+// thesis), sending "Thesis Discussion with Sir John" to investing. A single
+// keyword anywhere in the raw input decided the answer, in a fixed priority
+// order, with a distance-1 fuzzy fallback over all ~90 words — no mechanism at
+// that shape can tell the two senses of "thesis" apart.
 
 // --- Number words (spelled-out integers, EN + ID) ---
 //

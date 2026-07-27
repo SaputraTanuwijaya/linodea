@@ -5,7 +5,63 @@
  */
 
 import type { AnchorLinkResult } from "@linodea/parser";
-import type { ReminderNode, ReminderParseResult } from "@linodea/types";
+import type { ChainNode, ReminderNode, ReminderParseResult } from "@linodea/types";
+
+/** Section key for reminders with no tags. Not a valid tag — `normalizeTag`
+ *  requires a leading letter — so it can never collide with a real one. */
+export const UNTAGGED = "";
+
+/** The node's primary tag: the section it groups under in the chain view. */
+export function primaryTag(node: ReminderNode): string {
+  return node.tags[0] ?? UNTAGGED;
+}
+
+export interface TagSection {
+  tag: string;
+  roots: ChainNode[];
+}
+
+/**
+ * Bucket chain roots into chain-view sections, keyed on the **primary** tag.
+ *
+ * Grouping on `tags[0]` rather than every tag is deliberate: a tree section needs
+ * each node to appear exactly once. A two-tag reminder shown under two headers
+ * would duplicate its children and break the connector geometry, which is drawn
+ * from row indices within a section. The first tag the user typed is the primary
+ * one; the row renders the rest as chips.
+ *
+ * Ordering: tags alphabetically, untagged last — a user who tags everything
+ * never sees an "Untagged" header.
+ */
+export function groupChainsByTag(roots: ChainNode[]): TagSection[] {
+  const buckets = new Map<string, ChainNode[]>();
+
+  for (const chain of roots) {
+    const key = primaryTag(chain.node);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(chain);
+    else buckets.set(key, [chain]);
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => {
+      if (a === UNTAGGED) return 1;
+      if (b === UNTAGGED) return -1;
+      return a.localeCompare(b);
+    })
+    .map(([tag, sectionRoots]) => ({ tag, roots: sectionRoots }));
+}
+
+/** Every tag in use across a forest, sorted — the retag popover's quick picks. */
+export function collectTagsInUse(roots: ChainNode[]): string[] {
+  const all = new Set<string>();
+  const walk = (chain: ChainNode) => {
+    chain.node.tags.forEach((tag) => all.add(tag));
+    chain.children.forEach(walk);
+  };
+  roots.forEach(walk);
+  return [...all].sort();
+}
 
 /**
  * Build a fresh `ReminderNode` from a successful parser result.
@@ -32,7 +88,7 @@ export function createReminderNode(
     timezone: parseResult.draft.timezone,
     type: parseResult.draft.type,
     status: "pending",
-    category: parseResult.draft.category,
+    tags: parseResult.draft.tags,
     checklist: parseResult.draft.checklist,
     confidence: parseResult.draft.confidence,
     recurrence: parseResult.draft.recurrence,
@@ -45,7 +101,7 @@ export function createReminderNode(
 
 /**
  * Build a reminder that is linked to an anchor (a `/link` capture). Time + role
- * come from `parseAnchorLink`; the node **inherits the anchor's category and
+ * come from `parseAnchorLink`; the node **inherits the anchor's tags and
  * timezone** so it groups under the same chain. The caller links it into the
  * forest with `moveReminderNode({ parentId: anchor.id })` after creating it.
  */
@@ -65,7 +121,7 @@ export function createLinkedReminderNode(
     timezone: anchor.timezone,
     type: link.role, // "prep" | "followup" — derived from direction
     status: "pending",
-    category: anchor.category, // inherit so it sits in the anchor's chain/section
+    tags: [...anchor.tags], // inherit so it sits in the anchor's chain/section
     checklist: [],
     confidence: 0.9, // deterministic anchor math, not a fuzzy guess
     recurrence: undefined,

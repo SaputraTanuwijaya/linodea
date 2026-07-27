@@ -1,42 +1,51 @@
 /**
- * The chain view mode — a category-grouped tree of reminder chains.
+ * The chain view mode — a tag-grouped tree of reminder chains.
  *
  * Reads the assembled forest from `list_reminder_chains` (Rust owns ordering +
- * integrity). Roots are bucketed under category section headers (category is
- * the grouping key + color). Within a section a small lane layout draws the
- * connectors: roots share one vertical trunk, each child hooks off its parent
- * with a curved elbow (git's color + consistency, YouTube's shape). Done /
- * cancelled nodes are dimmed but kept, so the tree never loses its shape.
+ * integrity). Roots are bucketed under tag section headers. Within a section a
+ * small lane layout draws the connectors: roots share one vertical trunk, each
+ * child hooks off its parent with a curved elbow (git's color + consistency,
+ * YouTube's shape). Done / cancelled nodes are dimmed but kept, so the tree
+ * never loses its shape.
  *
- * The ONLY interaction is the manual category-correction escape hatch: click a
- * node's category dot to recategorize it (parser's guess is just a default).
- * Optional and non-destructive — reminders work fine uncategorized; this is for
- * the rare miss, not a management chore. Deliberately NOT a workspace: no
- * link/reorder/arrange (that would make it a calendar).
+ * **Grouping key is `tags[0]`, not the whole tag list.** A reminder can carry up
+ * to five tags, but a tree section needs each node to appear exactly once —
+ * showing a two-tag reminder under two headers would duplicate its children and
+ * break the connector math. The first tag the user typed is the primary one, and
+ * the row's tag chips show the rest. Grouping by any/all tags is deliberately
+ * deferred (it needs a filter surface, not a second section list).
+ *
+ * The ONLY interaction is retagging: click a node's dot to edit its tags. There
+ * is no auto-guess to correct anymore — tags come from what the user typed —
+ * so this is plain editing, optional and non-destructive. Deliberately NOT a
+ * workspace: no link/reorder/arrange (that would make it a calendar).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import {
+  collectTagsInUse,
   deleteReminderNode,
+  groupChainsByTag,
   listReminderChains,
-  setReminderCategory,
+  primaryTag,
+  setReminderTags,
 } from "@/entities/reminder";
-import { categoryColor } from "@/shared/config";
+import { tagColor } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import { formatDateTime, isTauriRuntime } from "@/shared/lib";
 import {
-  REMINDER_CATEGORIES,
+  MAX_TAGS_PER_REMINDER,
+  normalizeTag,
   type ChainNode,
-  type ReminderCategory,
   type ReminderNode,
 } from "@linodea/types";
 
 const ROW_H = 40;
 const BASE_X = 12;
 const INDENT = 26;
-const CATEGORY_MENU_HEIGHT = 268;
+const TAG_MENU_HEIGHT = 268;
 
 interface FlatRow {
   node: ReminderNode;
@@ -44,8 +53,10 @@ interface FlatRow {
   parentIndex: number | null;
 }
 
-interface CategoryMenuState {
+interface TagMenuState {
   id: string;
+  /** The reminder's current tags, so the popover can show and remove them. */
+  tags: string[];
   x: number;
   y: number;
 }
@@ -56,7 +67,7 @@ function effTime(node: ReminderNode): string {
 }
 
 /**
- * Flatten a category's roots into time-ordered rows.
+ * Flatten a section's roots into time-ordered rows.
  *
  * Within each node, children earlier than it (preps) render ABOVE it, later ones
  * (follow-ups) BELOW — both sorted by time, recursively — so the vertical order
@@ -135,7 +146,8 @@ export function ChainPage({
   const [chains, setChains] = useState<ChainNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  const [categoryMenu, setCategoryMenu] = useState<CategoryMenuState | null>(null);
+  const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
+  const [tagDraft, setTagDraft] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
 
   const clearableIds = useMemo(() => collectClearableIds(chains), [chains]);
@@ -156,16 +168,16 @@ export function ChainPage({
     void refresh();
   }, [refresh, refreshKey]);
 
-  // Close the category menu on outside click / Escape.
+  // Close the tag menu on outside click / Escape.
   useEffect(() => {
-    if (!categoryMenu) return;
+    if (!tagMenu) return;
     function onMouseDown(event: globalThis.MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setCategoryMenu(null);
+        setTagMenu(null);
       }
     }
     function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setCategoryMenu(null);
+      if (event.key === "Escape") setTagMenu(null);
     }
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeyDown);
@@ -173,12 +185,16 @@ export function ChainPage({
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [categoryMenu]);
+  }, [tagMenu]);
 
-  function openCategoryMenu(id: string, event: ReactMouseEvent) {
+  /** Every tag in use, for the popover's quick-pick list. */
+  const tagsInUse = useMemo(() => collectTagsInUse(chains), [chains]);
+
+  function openTagMenu(node: ReminderNode, event: ReactMouseEvent) {
     event.stopPropagation();
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    setCategoryMenu({ id, x: rect.left, y: rect.bottom + 4 });
+    setTagDraft("");
+    setTagMenu({ id: node.id, tags: node.tags, x: rect.left, y: rect.bottom + 4 });
   }
 
   async function clearCompleted() {
@@ -197,28 +213,39 @@ export function ChainPage({
     }
   }
 
-  async function pickCategory(category: ReminderCategory) {
-    if (!categoryMenu) return;
-    const id = categoryMenu.id;
-    setCategoryMenu(null);
+  /** Write a tag list and close the popover. Rust normalizes + caps it. */
+  async function applyTags(tags: string[]) {
+    if (!tagMenu) return;
+    const id = tagMenu.id;
+    setTagMenu(null);
     try {
-      await setReminderCategory({ id, category, updatedAt: new Date().toISOString() });
+      await setReminderTags({ id, tags, updatedAt: new Date().toISOString() });
       await refresh();
     } catch {
       // Silent.
     }
   }
 
-  const sections = REMINDER_CATEGORIES.map((category) => ({
-    category,
-    roots: chains.filter((chain) => chain.node.category === category),
-  })).filter((section) => section.roots.length > 0);
+  function addTag(raw: string) {
+    const tag = normalizeTag(raw);
+    if (!tag || !tagMenu) return;
+    // Re-adding an existing tag is a no-op rather than a duplicate row.
+    if (tagMenu.tags.includes(tag)) {
+      setTagMenu(null);
+      return;
+    }
+    void applyTags([...tagMenu.tags, tag]);
+  }
+
+  // Sections come from the tags actually in use, not a fixed enum. Grouping and
+  // ordering live in the entity (`groupChainsByTag`) so they're unit-tested.
+  const sections = useMemo(() => groupChainsByTag(chains), [chains]);
 
   // Flip the menu above the anchor when it would overflow the window bottom.
   const menuTop =
-    categoryMenu && categoryMenu.y + CATEGORY_MENU_HEIGHT > window.innerHeight
-      ? Math.max(4, categoryMenu.y - CATEGORY_MENU_HEIGHT - 8)
-      : categoryMenu?.y;
+    tagMenu && tagMenu.y + TAG_MENU_HEIGHT > window.innerHeight
+      ? Math.max(4, tagMenu.y - TAG_MENU_HEIGHT - 8)
+      : tagMenu?.y;
 
   return (
     <section className="mt-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl backdrop-blur transition-colors">
@@ -247,58 +274,110 @@ export function ChainPage({
         </p>
       ) : (
         <div className="max-h-[300px] space-y-3 overflow-y-auto">
-          {sections.map(({ category, roots }) => (
-            <CategoryChains
-              category={category}
-              key={category}
-              onDotClick={openCategoryMenu}
+          {sections.map(({ tag, roots }) => (
+            <TagChains
+              key={tag || UNTAGGED_SECTION_KEY}
+              onDotClick={openTagMenu}
               roots={roots}
               strings={strings}
+              tag={tag}
             />
           ))}
         </div>
       )}
 
-      {categoryMenu ? (
+      {tagMenu ? (
         <div
-          className="fixed z-50 min-w-[160px] rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
+          className="fixed z-50 min-w-[184px] rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg)] p-1 shadow-2xl"
           ref={menuRef}
-          style={{ left: categoryMenu.x, top: menuTop }}
+          style={{ left: tagMenu.x, top: menuTop }}
         >
-          {REMINDER_CATEGORIES.map((category) => (
+          {tagMenu.tags.length < MAX_TAGS_PER_REMINDER ? (
+            <input
+              autoFocus
+              className="mb-1 w-full rounded-md bg-[var(--lin-bg-hover)] px-2.5 py-1.5 text-sm text-[var(--lin-text)] outline-none placeholder:text-[var(--lin-text-mute)]"
+              onChange={(event) => setTagDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                addTag(tagDraft);
+              }}
+              placeholder={strings.chain.tagInput}
+              value={tagDraft}
+            />
+          ) : null}
+
+          {/* The reminder's own tags — click one to remove it. */}
+          {tagMenu.tags.map((tag) => (
             <button
-              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
-              key={category}
-              onClick={() => void pickCategory(category)}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-[var(--lin-text)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)]"
+              key={tag}
+              onClick={() => void applyTags(tagMenu.tags.filter((t) => t !== tag))}
               type="button"
             >
               <span
                 className="h-2.5 w-2.5 flex-none rounded-full"
-                style={{ background: categoryColor(category) }}
+                style={{ background: tagColor(tag) }}
               />
-              {strings.category[category]}
+              <span className="min-w-0 flex-1 truncate">{tag}</span>
+              <span aria-hidden className="flex-none text-xs">
+                ×
+              </span>
             </button>
           ))}
+
+          {/* Tags used elsewhere — one click reuses one instead of retyping. */}
+          {tagsInUse
+            .filter((tag) => !tagMenu.tags.includes(tag))
+            .slice(0, 6)
+            .map((tag) => (
+              <button
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-[var(--lin-text-dim)] transition hover:bg-[var(--lin-bg-hover)] hover:text-[var(--lin-text)]"
+                key={tag}
+                onClick={() => addTag(tag)}
+                type="button"
+              >
+                <span
+                  className="h-2.5 w-2.5 flex-none rounded-full"
+                  style={{ background: tagColor(tag) }}
+                />
+                <span className="min-w-0 flex-1 truncate">{tag}</span>
+              </button>
+            ))}
+
+          {tagMenu.tags.length > 1 ? (
+            <button
+              className="mt-1 w-full rounded-md px-2.5 py-1.5 text-left text-xs text-[var(--lin-text-mute)] transition hover:bg-[var(--lin-danger-bg)] hover:text-[var(--lin-danger)]"
+              onClick={() => void applyTags([])}
+              type="button"
+            >
+              {strings.chain.clearTags}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function CategoryChains({
-  category,
+/** React key for the untagged section — `tag` is "" there, which is falsy. */
+const UNTAGGED_SECTION_KEY = "__untagged__";
+
+function TagChains({
   onDotClick,
   roots,
   strings,
+  tag,
 }: {
-  category: ReminderCategory;
-  onDotClick: (id: string, event: ReactMouseEvent) => void;
+  onDotClick: (node: ReminderNode, event: ReactMouseEvent) => void;
   roots: ChainNode[];
   strings: Strings;
+  /** The section's primary tag; `""` (the untagged sentinel) for the no-tags bucket. */
+  tag: string;
 }) {
   const rows = flattenChains(roots);
   const height = rows.length * ROW_H;
-  const lineColor = categoryColor(category);
+  const lineColor = tagColor(tag || undefined);
 
   const rootIndexes = rows
     .map((row, index) => (row.parentIndex === null ? index : -1))
@@ -321,7 +400,7 @@ function CategoryChains({
   return (
     <div>
       <p className="mb-1 px-1 text-xs font-semibold uppercase tracking-wider" style={{ color: lineColor }}>
-        {strings.category[category]}
+        {tag || strings.chain.untagged}
       </p>
       <div className="relative" style={{ height }}>
         <svg
@@ -349,27 +428,38 @@ function CategoryChains({
               style={{ height: ROW_H, zIndex: 1, paddingLeft: row.depth * INDENT }}
             >
               <button
-                aria-label={strings.chain.setCategory}
+                aria-label={strings.chain.setTags}
                 className="flex-none cursor-pointer rounded-full"
-                onClick={(event) => onDotClick(row.node.id, event)}
+                onClick={(event) => onDotClick(row.node, event)}
                 style={{
                   width: 12,
                   height: 12,
                   marginLeft: 6,
-                  background: categoryColor(row.node.category),
+                  background: tagColor(primaryTag(row.node) || undefined),
                   boxShadow: "0 0 0 3px var(--lin-bg)",
                 }}
-                title={strings.chain.setCategory}
+                title={strings.chain.setTags}
                 type="button"
               />
               <span
-                className={`ml-2.5 min-w-0 flex-1 truncate text-sm ${
+                className={`ml-2.5 min-w-0 truncate text-sm ${
                   isDone ? "text-[var(--lin-text-mute)] line-through" : "text-[var(--lin-text)]"
                 }`}
               >
                 {row.node.title}
               </span>
-              <span className="ml-3 flex-none whitespace-nowrap text-xs text-[var(--lin-text-dim)]">
+              {/* Secondary tags only — the primary one is already the section
+                  header, so repeating it on every row would be noise. */}
+              {row.node.tags.slice(1).map((tag) => (
+                <span
+                  className="ml-1.5 flex-none rounded px-1.5 py-0.5 text-[10px] leading-none"
+                  key={tag}
+                  style={{ color: tagColor(tag), background: "var(--lin-bg-hover)" }}
+                >
+                  {tag}
+                </span>
+              ))}
+              <span className="ml-3 flex-1 whitespace-nowrap text-right text-xs text-[var(--lin-text-dim)]">
                 {meta}
               </span>
             </div>

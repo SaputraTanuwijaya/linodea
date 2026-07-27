@@ -3,5 +3,5 @@
  * with no business logic.
  */
 
-export { CATEGORY_COLOR, categoryColor } from "./categories";
+export { TAG_PALETTE, UNTAGGED_COLOR, tagColor } from "./tags";
 export { KO_FI_URL, SAWERIA_URL, FEEDBACK_FORM_URL } from "./links";

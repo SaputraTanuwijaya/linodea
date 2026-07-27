@@ -45,6 +45,7 @@ Return type: `ReminderParseResult` from `@linodea/types`.
 - Month + day: `June 5 9am`, `5 Juni jam 8`, `tanggal 17 jam 8`.
 - English and Indonesian month names/short forms are recognized exactly.
 - Month+day without a year resolves to this year, or next year if that local date/time has already passed.
+- All three shapes are matched and the best candidate wins, not first-pattern-wins: a candidate overlapping the clock time is **dropped** (a digit that belongs to the clock is not a calendar day), then the earliest in the text wins. Without this, `30 August 13:00` scheduled **August 13** — the hour filled the month+day pattern's day slot.
 - `tanggal N` / `tgl N` without a month resolves to this month, or next month if that local day/time has already passed.
 - A calendar date without a clock time emits `missing_time` and does not schedule.
 
@@ -77,19 +78,16 @@ Splitters: comma, plus, `and`, `dan`. Short bring/prepare phrases split by word.
 | `cooldown`, `cool off` | `cooldown` |
 | default | `main` |
 
-### Category heuristics
+### Tags (`#tag`)
 
-Driven by the `CATEGORY_*` vocabularies in `vocabularies.ts` (the single source — there is no parallel regex), matched **exact-then-fuzzy** in the priority order below. First hit wins, so the order resolves cross-category overlaps (e.g. `university` precedes `urgent`). Representative keywords — see the vocabularies for the full bilingual lists.
+User-authored, extracted not guessed. `besok jam 8 rapat tim #kerja` → `tags: ["kerja"]`, title `rapat tim`.
 
-| Category (priority) | Keywords (representative) |
-|---|---|
-| tutoring | `les`, `privat`, `bimbel`, `ngajar`, `murid`, `tutor`, `tutoring` |
-| university | `lab`, `class`, `kelas`, `kuliah`, `kampus`, `tugas`, `ujian`, `kuis`, `skripsi`, `slides`, `presentasi` |
-| investing | `cpi`, `fomc`, `saham`, `stock`, `invest`, `dividen`, `reksadana`, `ihsg`, `portofolio` |
-| urgent | `urgent`, `asap`, `penting`, `darurat`, `segera`, `mendesak` |
-| waiting | `waiting`, `pending`, `follow up`, `menunggu`, `nunggu`, `konfirmasi` |
-| personal | `personal`, `rumah`, `keluarga`, `dokter`, `obat`, `belanja`, `olahraga`, `ultah` |
-| default | uncategorized |
+- Normalized by `normalizeTag` in `@linodea/types` (the single source, mirrored by Rust validation): lowercased, `#` stripped, punctuation dropped (`-`/`_` survive), Unicode letters so `#skripsi` and `#kerja` are as valid as `#work`, capped at 24 chars and 5 tags per reminder.
+- The character after `#` **must be a letter** — `#2` in `buy #2 pencil` stays in the title.
+- Deduped case-insensitively (`#Kerja … #kerja` → one tag), but a repeat spelling is still stripped from the title. Past the 5-tag cap, extra `#foo` tokens are left visible in the title rather than silently swallowed.
+- **No fuzzy matching, deliberately.** A tag is literal user text; "correcting" it toward a vocabulary would invent intent. `tags[0]` is the chain view's grouping key.
+
+This replaced six fixed categories (`university`/`investing`/`personal`/`tutoring`/`urgent`/`waiting`) guessed from ~90 keywords. That set was one person's life — 19 of 20 ordinary captures came back `uncategorized` — and it could be confidently wrong: `thesis` lived in the investing list, so `Thesis Discussion with Sir John` was filed under investing.
 
 ## `/link` anchor-relative time (`parseAnchorLink`)
 
@@ -118,7 +116,7 @@ The parser falls back to fuzzy matching when an exact regex misses. Uses Damerau
 
 Both still emit an `autocorrect` issue, so the popup surfaces the correction for the user to verify — the residual false-positive risk (e.g. `jam 7 store`, or a genuine interior item within distance 1 of `dan`) is visible, not silent.
 
-**Added in v1.2** (categories): category vocabularies are now fuzzy-matched as a fallback, capped at distance 1 (same short-vocab guard as v1.1, because the lists are large and false-match-prone). Reached only when every exact pass misses, and each hit emits an `autocorrect` issue, so the residual false-positive risk is visible, not silent. Category is a low-stakes hint and correctable in the chain view, so the looser exposure is acceptable. `besok review sahm BBCA` → investing (`sahm → saham`).
+**Removed in v1.3**: the v1.2 category-vocabulary fuzzy pass. Categories are gone (see Tags above), and tags are never fuzzy-matched.
 
 **What stays exact** (intentional):
 - `jam`, `am`, `pm`, time units (`m/min/h/hr`) — short and rarely typo'd

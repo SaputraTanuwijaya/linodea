@@ -1,20 +1,15 @@
-import type {
-  IanaTimezone,
-  IsoDateTimeString,
-  ParserIssue,
-  ParsedReminderDraft,
-  Recurrence,
-  ReminderCategory,
-  ReminderParseResult,
-  ReminderType,
+import {
+  normalizeTag,
+  MAX_TAGS_PER_REMINDER,
+  type IanaTimezone,
+  type IsoDateTimeString,
+  type ParserIssue,
+  type ParsedReminderDraft,
+  type Recurrence,
+  type ReminderParseResult,
+  type ReminderType,
 } from "@linodea/types";
 import {
-  CATEGORY_INVESTING,
-  CATEGORY_PERSONAL,
-  CATEGORY_TUTORING,
-  CATEGORY_UNIVERSITY,
-  CATEGORY_URGENT,
-  CATEGORY_WAITING,
   CHECKLIST_CONJUNCTIONS,
   CHECKLIST_CUES,
   DATE_WORDS,
@@ -174,21 +169,18 @@ export function parseReminderWithNow(
     countdown,
   );
   const typeFinding = detectReminderType(normalizedInput, options.preferredLanguage);
-  const categoryFinding = detectReminderCategory(
-    normalizedInput,
-    options.preferredLanguage,
-  );
+  const tagFinding = extractTags(normalizedInput);
   const typeSegments = findTypeSegments(normalizedInput);
   const textWithoutMeta = removeSegments(normalizedInput, [
     ...dateTime.segments,
     ...typeSegments,
+    ...tagFinding.segments,
   ]);
   const checklistParse = extractChecklist(textWithoutMeta, options.preferredLanguage);
   const title = cleanTitle(checklistParse.titleSource);
 
   const issues: ParserIssue[] = [...dateTime.issues];
   if (typeFinding.issue) issues.push(typeFinding.issue);
-  if (categoryFinding.issue) issues.push(categoryFinding.issue);
   issues.push(...checklistParse.issues);
 
   // Autocorrects shouldn't tank confidence as hard as real parse failures.
@@ -215,7 +207,7 @@ export function parseReminderWithNow(
     scheduledAt: dateTime.scheduledAt,
     timezone: options.timezone,
     type: typeFinding.type,
-    category: categoryFinding.category,
+    tags: tagFinding.tags,
     checklist: checklistParse.checklist,
     confidence,
     recurrence: dateTime.recurrence,
@@ -358,12 +350,15 @@ function parseDateTime(
   preferredLanguage: PreferredLanguage,
   countdown: boolean,
 ): DateTimeParse {
+  // The clock time is resolved first because the calendar-date matcher needs to
+  // know which digits are already spoken for — see `findCalendarDate`.
+  const time = findClockTime(input);
+
   // Recurrence is checked before relative time: `every 2 days` would otherwise
   // be claimed by the bare-relative matcher (`2 days`) as a one-off. Recurrence
   // always needs an explicit cadence keyword, so one-off `in 2 days` is safe.
   const recurrenceFinding = findRecurrence(input);
   if (recurrenceFinding) {
-    const time = findClockTime(input);
     const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
     const segments = [
       ...recurrenceFinding.segments,
@@ -405,10 +400,10 @@ function parseDateTime(
     };
   }
 
-  const earlyCalendarDate = findCalendarDate(input)?.match;
+  const earlyCalendarDate = findCalendarDate(input, time?.segment)?.match;
   const relative = earlyCalendarDate ? undefined : findRelativeTime(input);
   if (relative) {
-    const clock = relative.days !== undefined ? findClockTime(input) : undefined;
+    const clock = relative.days !== undefined ? time : undefined;
     if (clock && relative.days !== undefined) {
       const baseDate = addDaysInTimezone(now, timezone, relative.days);
       const connector = findRelativeClockConnector(
@@ -460,7 +455,6 @@ function parseDateTime(
   const dateMatch = dateFinding?.match;
   const dateIssues: ParserIssue[] = dateFinding?.issue ? [dateFinding.issue] : [];
   const calendarDate = earlyCalendarDate;
-  const time = findClockTime(input);
   const timeIssues: ParserIssue[] = time?.issue ? [time.issue] : [];
   const calendarConnector =
     calendarDate && time
@@ -946,28 +940,57 @@ const MONTH_ALTERNATION = Object.keys(MONTH_INDEX)
   .sort((a, b) => b.length - a.length)
   .join("|");
 
-function findCalendarDate(input: string): CalendarDateFinding | undefined {
+/** True when two text segments share at least one character position. */
+function segmentsOverlap(a: TextSegment, b: TextSegment | undefined): boolean {
+  return b !== undefined && a.start < b.end && b.start < a.end;
+}
+
+/**
+ * Find a calendar date. All three shapes are matched and the best candidate
+ * chosen, rather than first-pattern-wins, because adjacent numbers made the old
+ * order silently pick the wrong date: `30 August 13:00` read as **August 13**,
+ * since month+day was tried first and `13` — the hour of a 24-hour clock —
+ * satisfied its day slot (the `\b` after the day is happy with a following `:`).
+ * A wrong date that still schedules is the worst failure mode here, so two rules
+ * now resolve it:
+ *
+ *  - drop any candidate overlapping the clock time — a digit that belongs to the
+ *    clock is not a calendar day;
+ *  - of what survives, the earliest in the text wins (longest on a tie), the same
+ *    reading-order rule `findRelativeTime` uses.
+ *
+ * `am`/`pm` times never needed this (`July 10AM` already failed the day slot's
+ * word boundary); `HH:MM` and `jam N` are what the overlap rule covers.
+ */
+function findCalendarDate(
+  input: string,
+  clockSegment?: TextSegment,
+): CalendarDateFinding | undefined {
+  const candidates: CalendarDateMatch[] = [];
+
+  const add = (
+    match: RegExpExecArray,
+    day: number,
+    month: number | undefined,
+    year: number | undefined,
+  ): void => {
+    if (!isValidCalendarDate(day, month, year)) return;
+    const segment = { start: match.index, end: match.index + match[0].length };
+    if (segmentsOverlap(segment, clockSegment)) return;
+    candidates.push({ day, month, year, segment });
+  };
+
   const monthDay = new RegExp(
     `\\b(?:on\\s+)?(${MONTH_ALTERNATION})\\.?\\s+(\\d{1,2})(?:,?\\s+(\\d{4}))?\\b`,
     "i",
   ).exec(input);
   if (monthDay?.index !== undefined) {
-    const month = MONTH_INDEX[monthDay[1].toLowerCase()];
-    const day = Number(monthDay[2]);
-    const year = monthDay[3] ? Number(monthDay[3]) : undefined;
-    if (isValidCalendarDate(day, month, year)) {
-      return {
-        match: {
-          day,
-          month,
-          year,
-          segment: {
-            start: monthDay.index,
-            end: monthDay.index + monthDay[0].length,
-          },
-        },
-      };
-    }
+    add(
+      monthDay,
+      Number(monthDay[2]),
+      MONTH_INDEX[monthDay[1].toLowerCase()],
+      monthDay[3] ? Number(monthDay[3]) : undefined,
+    );
   }
 
   const dayMonth = new RegExp(
@@ -975,22 +998,12 @@ function findCalendarDate(input: string): CalendarDateFinding | undefined {
     "i",
   ).exec(input);
   if (dayMonth?.index !== undefined) {
-    const day = Number(dayMonth[1]);
-    const month = MONTH_INDEX[dayMonth[2].toLowerCase()];
-    const year = dayMonth[3] ? Number(dayMonth[3]) : undefined;
-    if (isValidCalendarDate(day, month, year)) {
-      return {
-        match: {
-          day,
-          month,
-          year,
-          segment: {
-            start: dayMonth.index,
-            end: dayMonth.index + dayMonth[0].length,
-          },
-        },
-      };
-    }
+    add(
+      dayMonth,
+      Number(dayMonth[1]),
+      MONTH_INDEX[dayMonth[2].toLowerCase()],
+      dayMonth[3] ? Number(dayMonth[3]) : undefined,
+    );
   }
 
   const tanggal = new RegExp(
@@ -998,27 +1011,23 @@ function findCalendarDate(input: string): CalendarDateFinding | undefined {
     "i",
   ).exec(input);
   if (tanggal?.index !== undefined) {
-    const day = Number(tanggal[1]);
-    const month = tanggal[2]
-      ? MONTH_INDEX[tanggal[2].toLowerCase()]
-      : undefined;
-    const year = tanggal[3] ? Number(tanggal[3]) : undefined;
-    if (isValidCalendarDate(day, month, year)) {
-      return {
-        match: {
-          day,
-          month,
-          year,
-          segment: {
-            start: tanggal.index,
-            end: tanggal.index + tanggal[0].length,
-          },
-        },
-      };
-    }
+    add(
+      tanggal,
+      Number(tanggal[1]),
+      tanggal[2] ? MONTH_INDEX[tanggal[2].toLowerCase()] : undefined,
+      tanggal[3] ? Number(tanggal[3]) : undefined,
+    );
   }
 
-  return undefined;
+  if (candidates.length === 0) return undefined;
+
+  candidates.sort(
+    (a, b) =>
+      a.segment.start - b.segment.start ||
+      b.segment.end - b.segment.start - (a.segment.end - a.segment.start),
+  );
+
+  return { match: candidates[0] };
 }
 
 function resolveCalendarDate(
@@ -1461,103 +1470,58 @@ function cleanTitle(input: string): string {
     .trim();
 }
 
-interface CategoryFinding {
-  category: ReminderCategory;
-  issue?: ParserIssue;
+interface TagFinding {
+  tags: string[];
+  segments: TextSegment[];
 }
 
 /**
- * Category vocabularies in priority order. First exact (then fuzzy) hit wins,
- * so the order resolves cross-category overlaps (e.g. "urgent lab session"
- * stays university because university precedes urgent — matching the prior
- * hand-written regex order).
+ * A `#tag` token. The first character after `#` must be a letter, so `#2` in
+ * "buy #2 pencil" stays part of the title instead of becoming a tag named "2".
+ * Unicode letter classes (not `a-z`) keep Indonesian tags first-class.
  */
-const CATEGORY_GROUPS: ReadonlyArray<{
-  vocab: VocabularyEntry[];
-  category: ReminderCategory;
-  kind: string;
-  exact: RegExp;
-}> = (
-  [
-    { vocab: CATEGORY_TUTORING, category: "tutoring", kind: "tutoring cue" },
-    { vocab: CATEGORY_UNIVERSITY, category: "university", kind: "university cue" },
-    { vocab: CATEGORY_INVESTING, category: "investing", kind: "investing cue" },
-    { vocab: CATEGORY_URGENT, category: "urgent", kind: "urgent cue" },
-    { vocab: CATEGORY_WAITING, category: "waiting", kind: "waiting cue" },
-    { vocab: CATEGORY_PERSONAL, category: "personal", kind: "personal cue" },
-  ] satisfies ReadonlyArray<{
-    vocab: VocabularyEntry[];
-    category: ReminderCategory;
-    kind: string;
-  }>
-).map((g) => ({ ...g, exact: vocabularyRegex(g.vocab) }));
-
-/** Case-insensitive word-boundary regex matching any word in a vocabulary. */
-function vocabularyRegex(vocab: VocabularyEntry[]): RegExp {
-  const alternation = vocab
-    .map((entry) => entry.word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("|");
-  return new RegExp(`\\b(?:${alternation})\\b`, "i");
-}
+const TAG_PATTERN = /(?:^|\s)#(\p{L}[\p{L}\p{N}_-]*)/gu;
 
 /**
- * Categorize from keyword vocabularies, exact-then-fuzzy, mirroring
- * `detectReminderType`. Category is a low-stakes organizational hint, so the
- * fuzzy fallback is capped at edit distance 1 (the v1.1 short-vocab guard):
- * the vocabularies are large and false-match-prone, and a wrong guess here
- * costs little and is correctable in the chain view. Each fuzzy hit emits an
- * `autocorrect` issue so the correction is visible, not silent.
+ * Extract user-authored tags, replacing the deleted keyword categorizer. This is
+ * pure extraction — there is deliberately **no fuzzy matching**: a tag is
+ * literal user text, so "correcting" `#skripsi` toward some vocabulary would be
+ * inventing intent the user didn't express. Nothing here can be confidently
+ * wrong the way `thesis → investing` was.
+ *
+ * Segments are returned so the `#tag` tokens are stripped from the title, the
+ * same treatment `/countdown` gets — a title should read "rapat tim", not
+ * "rapat tim #kerja".
  */
-function detectReminderCategory(
-  input: string,
-  preferredLanguage: PreferredLanguage,
-): CategoryFinding {
-  const lower = input.toLowerCase();
+function extractTags(input: string): TagFinding {
+  const tags: string[] = [];
+  const segments: TextSegment[] = [];
+  const seen = new Set<string>();
 
-  // Exact pass — behavior-preserving, zero added false-match risk.
-  for (const { exact, category } of CATEGORY_GROUPS) {
-    if (exact.test(lower)) return { category };
-  }
+  for (const match of input.matchAll(TAG_PATTERN)) {
+    if (match.index === undefined) continue;
+    const tag = normalizeTag(match[1]);
+    if (!tag) continue;
+    // Past the cap, stop stripping too — a leftover `#f` in the title is a
+    // visible signal that tags were dropped, rather than a silent swallow.
+    if (!seen.has(tag) && tags.length >= MAX_TAGS_PER_REMINDER) break;
 
-  // Fuzzy fallback (distance 1 only). Reached only when every exact pass missed.
-  for (const { vocab, category, kind } of CATEGORY_GROUPS) {
-    const fuzzy = findFuzzyTokenMatch(input, wordsOf(vocab), {
-      maxDistance: distanceOneOnly,
-    });
-    if (!fuzzy) continue;
-
-    // Both tied candidates live in the same vocabulary, so the category is
-    // unambiguous even when the exact word isn't — cite the language-biased
-    // word if we can, otherwise the first candidate.
-    if ("ambiguous" in fuzzy) {
-      const biased = resolveByLanguage(
-        fuzzy.ambiguous.candidates,
-        vocab,
-        preferredLanguage,
-      );
-      return {
-        category,
-        issue: makeAutocorrectIssue(
-          fuzzy.original,
-          biased?.word ?? fuzzy.ambiguous.candidates[0],
-          fuzzy.ambiguous.distance,
-          kind,
-        ),
-      };
+    // A repeat spelling (`#Kerja … #kerja`) contributes no new tag but must
+    // still leave the title, so the segment is recorded either way.
+    if (!seen.has(tag)) {
+      seen.add(tag);
+      tags.push(tag);
     }
-
-    return {
-      category,
-      issue: makeAutocorrectIssue(
-        fuzzy.original,
-        fuzzy.result.matched,
-        fuzzy.result.distance,
-        kind,
-      ),
-    };
+    // Keep any leading whitespace the pattern consumed out of the segment, so
+    // removal doesn't glue neighbouring words together.
+    const offset = match[0].length - (match[1].length + 1);
+    segments.push({
+      start: match.index + offset,
+      end: match.index + match[0].length,
+    });
   }
 
-  return { category: "uncategorized" };
+  return { tags, segments };
 }
 
 function scoreConfidence(input: {

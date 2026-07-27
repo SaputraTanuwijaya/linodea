@@ -9,20 +9,25 @@ export {
   listReminderChains,
   listReminderNodes,
   moveReminderNode,
-  setReminderCategory,
+  setReminderTags,
   updateReminderNode,
   updateReminderNodeStatus,
   type AdvanceRecurrencePatch,
   type MovePatch,
-  type ReminderCategoryPatch,
+  type ReminderTagsPatch,
   type ReminderEditPatch,
   type ReminderStatusPatch,
 } from "./api/commands";
 export {
   byScheduledAt,
+  collectTagsInUse,
   createLinkedReminderNode,
   createReminderNode,
+  groupChainsByTag,
   isActionable,
+  primaryTag,
+  UNTAGGED,
+  type TagSection,
 } from "./model/reminder";
 export {
   clearReminderFireRecord,

@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -28,17 +28,11 @@ CREATE TABLE IF NOT EXISTS reminder_nodes (
   status TEXT NOT NULL CHECK (
     status IN ('pending', 'done', 'missed', 'snoozed', 'cancelled')
   ),
-  category TEXT NOT NULL CHECK (
-    category IN (
-      'university',
-      'investing',
-      'personal',
-      'tutoring',
-      'urgent',
-      'waiting',
-      'uncategorized'
-    )
-  ),
+  -- v4: replaced the `category` column (a CHECK-constrained enum of six fixed
+  -- categories) with free-text user tags, stored as a JSON array exactly like
+  -- `checklist_json`. No CHECK, no join table — tags are open-ended by design,
+  -- and a local single-user store filters/groups them in the UI anyway.
+  tags_json TEXT NOT NULL DEFAULT '[]',
   parent_id TEXT,
   previous_id TEXT,
   next_id TEXT,
@@ -93,7 +87,7 @@ pub struct ReminderNode {
     #[serde(rename = "type")]
     pub reminder_type: String,
     pub status: String,
-    pub category: String,
+    pub tags: Vec<String>,
     pub parent_id: Option<String>,
     pub previous_id: Option<String>,
     pub next_id: Option<String>,
@@ -133,7 +127,7 @@ pub struct ReminderEditPatch {
     pub timezone: String,
     #[serde(rename = "type")]
     pub reminder_type: String,
-    pub category: String,
+    pub tags: Vec<String>,
     pub checklist: Vec<String>,
     pub recurrence: Option<Recurrence>,
     pub updated_at: String,
@@ -165,15 +159,15 @@ pub struct MovePatch {
     pub updated_at: String,
 }
 
-/// Change just a reminder's category — the manual "fix the auto-guess" escape
-/// hatch. Optional and non-destructive (categories are an organizational
-/// nicety; reminders work regardless). Each correction is also a future
-/// training label for auto-categorization.
+/// Retag a reminder from the chain view. Replaces the old category-correction
+/// patch: there is no auto-guess left to "fix", so this is straightforward
+/// editing rather than an escape hatch. Optional and non-destructive —
+/// reminders work fine untagged.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReminderCategoryPatch {
+pub struct ReminderTagsPatch {
     pub id: String,
-    pub category: String,
+    pub tags: Vec<String>,
     pub updated_at: String,
 }
 
@@ -275,6 +269,7 @@ impl ReminderStore {
     pub fn create_reminder(&self, reminder: ReminderNode) -> Result<ReminderNode, String> {
         validate_reminder(&reminder)?;
 
+        let tags_json = serialize_tags(&reminder.tags)?;
         let checklist_json = serde_json::to_string(&reminder.checklist).map_err(to_store_error)?;
         let recurrence_json = serialize_recurrence(&reminder.recurrence)?;
         self.connection
@@ -290,7 +285,7 @@ impl ReminderStore {
                   timezone,
                   reminder_type,
                   status,
-                  category,
+                  tags_json,
                   parent_id,
                   previous_id,
                   next_id,
@@ -316,7 +311,7 @@ impl ReminderStore {
                     reminder.timezone,
                     reminder.reminder_type,
                     reminder.status,
-                    reminder.category,
+                    tags_json,
                     reminder.parent_id,
                     reminder.previous_id,
                     reminder.next_id,
@@ -352,7 +347,7 @@ impl ReminderStore {
                   timezone,
                   reminder_type,
                   status,
-                  category,
+                  tags_json,
                   parent_id,
                   previous_id,
                   next_id,
@@ -402,7 +397,7 @@ impl ReminderStore {
                   timezone,
                   reminder_type,
                   status,
-                  category,
+                  tags_json,
                   parent_id,
                   previous_id,
                   next_id,
@@ -491,6 +486,7 @@ impl ReminderStore {
     pub fn update_reminder(&self, patch: ReminderEditPatch) -> Result<ReminderNode, String> {
         validate_edit_patch(&patch)?;
 
+        let tags_json = serialize_tags(&patch.tags)?;
         let checklist_json = serde_json::to_string(&patch.checklist).map_err(to_store_error)?;
         let recurrence_json = serialize_recurrence(&patch.recurrence)?;
         let changed = self
@@ -504,7 +500,7 @@ impl ReminderStore {
                   scheduled_at = ?4,
                   timezone = ?5,
                   reminder_type = ?6,
-                  category = ?7,
+                  tags_json = ?7,
                   checklist_json = ?8,
                   recurrence_json = ?9,
                   updated_at = ?10,
@@ -518,7 +514,7 @@ impl ReminderStore {
                     patch.scheduled_at,
                     patch.timezone,
                     patch.reminder_type,
-                    patch.category,
+                    tags_json,
                     checklist_json,
                     recurrence_json,
                     patch.updated_at,
@@ -534,39 +530,25 @@ impl ReminderStore {
             .ok_or_else(|| "Reminder was updated but could not be read back.".to_string())
     }
 
-    /// Change only a reminder's category (the manual correction escape hatch).
-    pub fn set_reminder_category(
-        &self,
-        patch: ReminderCategoryPatch,
-    ) -> Result<ReminderNode, String> {
+    /// Replace a reminder's tags (retagging from the chain view).
+    pub fn set_reminder_tags(&self, patch: ReminderTagsPatch) -> Result<ReminderNode, String> {
         if patch.id.trim().is_empty() {
             return Err("Reminder id is required.".to_string());
         }
         if patch.updated_at.trim().is_empty() {
             return Err("Reminder update time is required.".to_string());
         }
-        if !matches!(
-            patch.category.as_str(),
-            "university"
-                | "investing"
-                | "personal"
-                | "tutoring"
-                | "urgent"
-                | "waiting"
-                | "uncategorized"
-        ) {
-            return Err("Reminder category is not supported.".to_string());
-        }
 
+        let tags_json = serialize_tags(&patch.tags)?;
         let changed = self
             .connection
             .execute(
                 r#"
                 UPDATE reminder_nodes
-                SET category = ?2, updated_at = ?3, sync_version = sync_version + 1
+                SET tags_json = ?2, updated_at = ?3, sync_version = sync_version + 1
                 WHERE id = ?1
                 "#,
-                params![patch.id, patch.category, patch.updated_at],
+                params![patch.id, tags_json, patch.updated_at],
             )
             .map_err(to_store_error)?;
 
@@ -575,7 +557,7 @@ impl ReminderStore {
         }
 
         self.get_reminder_by_id(&patch.id)?
-            .ok_or_else(|| "Reminder category was updated but could not be read back.".to_string())
+            .ok_or_else(|| "Reminder tags were updated but could not be read back.".to_string())
     }
 
     /// Re-arm a recurring reminder onto its next occurrence: new time + rule,
@@ -921,7 +903,25 @@ impl ReminderStore {
         self.connection
             .execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![CURRENT_SCHEMA_VERSION, "add_reminder_fire_state"],
+                params![3, "add_reminder_fire_state"],
+            )
+            .map_err(to_store_error)?;
+
+        // v4: `category` → `tags_json`. Deliberately NO `ALTER TABLE` backfill:
+        // this landed pre-launch with exactly one database in existence (the
+        // author's dev install), so a pre-v4 DB is expected to be deleted rather
+        // than migrated. `backup_before_upgrade` still snapshots it first,
+        // because CURRENT_SCHEMA_VERSION moved ahead of it.
+        //
+        // If a future change ever does need to reshape a *shipped* DB, follow the
+        // v2 pattern above instead: a `column_exists` guard plus `ALTER TABLE`.
+        // That style is state-based — it inspects the DB rather than trusting a
+        // version number — so a user jumping several releases at once cannot skip
+        // it, which an ordered list of per-version deltas could.
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
+                params![CURRENT_SCHEMA_VERSION, "replace_category_with_tags"],
             )
             .map_err(to_store_error)?;
 
@@ -958,7 +958,7 @@ impl ReminderStore {
                   timezone,
                   reminder_type,
                   status,
-                  category,
+                  tags_json,
                   parent_id,
                   previous_id,
                   next_id,
@@ -996,6 +996,15 @@ impl ReminderStore {
 }
 
 fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> {
+    let tags_json: String = row.get("tags_json")?;
+    let tags = serde_json::from_str(&tags_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            tags_json.len(),
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })?;
+
     let checklist_json: String = row.get("checklist_json")?;
     let checklist = serde_json::from_str(&checklist_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
@@ -1029,7 +1038,7 @@ fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> 
         timezone: row.get("timezone")?,
         reminder_type: row.get("reminder_type")?,
         status: row.get("status")?,
-        category: row.get("category")?,
+        tags,
         parent_id: row.get("parent_id")?,
         previous_id: row.get("previous_id")?,
         next_id: row.get("next_id")?,
@@ -1131,20 +1140,54 @@ fn validate_edit_patch(patch: &ReminderEditPatch) -> Result<(), String> {
         return Err("Reminder type is not supported.".to_string());
     }
 
-    if !matches!(
-        patch.category.as_str(),
-        "university"
-            | "investing"
-            | "personal"
-            | "tutoring"
-            | "urgent"
-            | "waiting"
-            | "uncategorized"
-    ) {
-        return Err("Reminder category is not supported.".to_string());
-    }
-
     Ok(())
+}
+
+/// Max characters in one tag, and max tags per reminder. Mirrors
+/// `TAG_MAX_LENGTH` / `MAX_TAGS_PER_REMINDER` in `@linodea/types` — the TS side
+/// is the contract, this is the enforcement at the storage boundary.
+const TAG_MAX_LENGTH: usize = 24;
+const MAX_TAGS_PER_REMINDER: usize = 5;
+
+/// Canonical form of one tag: lowercased, leading `#` stripped, punctuation and
+/// spaces dropped (`-`/`_` survive), length-capped. Must start with a letter, so
+/// `#2` never becomes a tag named "2". Mirrors `normalizeTag` in
+/// `@linodea/types`; `char::is_alphanumeric` is Unicode-aware, matching the TS
+/// side's `\p{L}\p{N}` so Indonesian tags round-trip.
+///
+/// Returns None for anything unusable. Normalizing rather than rejecting is
+/// deliberate: tags are a low-stakes organizational hint, and a stray character
+/// should not fail a save.
+fn normalize_tag(raw: &str) -> Option<String> {
+    let stripped = raw.trim().trim_start_matches('#').to_lowercase();
+    let kept: String = stripped
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(TAG_MAX_LENGTH)
+        .collect();
+    let tag = kept.trim_matches(|c| c == '-' || c == '_');
+    if tag.is_empty() || !tag.chars().next().is_some_and(char::is_alphabetic) {
+        return None;
+    }
+    Some(tag.to_string())
+}
+
+/// Normalize, dedupe (first spelling wins) and cap a tag list, then serialize it
+/// to the JSON stored in `tags_json`. Order is preserved so `tags[0]` stays the
+/// tag the user typed first — the chain view groups on it.
+fn serialize_tags(tags: &[String]) -> Result<String, String> {
+    let mut normalized: Vec<String> = Vec::new();
+    for raw in tags {
+        if let Some(tag) = normalize_tag(raw) {
+            if !normalized.contains(&tag) {
+                normalized.push(tag);
+            }
+        }
+        if normalized.len() >= MAX_TAGS_PER_REMINDER {
+            break;
+        }
+    }
+    serde_json::to_string(&normalized).map_err(to_store_error)
 }
 
 fn to_store_error(error: impl std::fmt::Display) -> String {
@@ -1543,7 +1586,7 @@ mod tests {
                 scheduled_at: "2026-05-23T02:00:00.000Z".to_string(),
                 timezone: "Asia/Jakarta".to_string(),
                 reminder_type: "deadline".to_string(),
-                category: "university".to_string(),
+                tags: vec!["skripsi".to_string()],
                 checklist: vec!["draft".to_string()],
                 recurrence: None,
                 updated_at: "2026-05-22T13:00:00.000Z".to_string(),
@@ -1553,7 +1596,7 @@ mod tests {
         assert_eq!(updated.title, "Submit grant form");
         assert_eq!(updated.scheduled_at, "2026-05-23T02:00:00.000Z");
         assert_eq!(updated.reminder_type, "deadline");
-        assert_eq!(updated.category, "university");
+        assert_eq!(updated.tags, vec!["skripsi"]);
         assert_eq!(updated.checklist, vec!["draft"]);
         assert_eq!(updated.sync_version, 1);
         // Status/created fields are untouched by an edit.
@@ -1562,26 +1605,65 @@ mod tests {
     }
 
     #[test]
-    fn update_rejects_unknown_category() {
+    fn update_normalizes_tags_instead_of_rejecting_them() {
+        // The old `category` column was a CHECK-constrained enum, so an unknown
+        // value was an error. Tags are open-ended user text, so the storage
+        // boundary normalizes instead: a stray `#`, casing, and a duplicate all
+        // get cleaned rather than failing the save.
         let store = ReminderStore::open_in_memory().expect("store opens");
         store
             .create_reminder(sample_reminder("reminder-1"))
             .expect("reminder is created");
 
-        let result = store.update_reminder(ReminderEditPatch {
-            id: "reminder-1".to_string(),
-            title: "Whatever".to_string(),
-            raw_input: "in 1h whatever".to_string(),
-            scheduled_at: "2026-05-22T13:30:00.000Z".to_string(),
-            timezone: "Asia/Jakarta".to_string(),
-            reminder_type: "main".to_string(),
-            category: "not-a-category".to_string(),
-            checklist: vec![],
-            recurrence: None,
-            updated_at: "2026-05-22T13:00:00.000Z".to_string(),
-        });
+        let updated = store
+            .update_reminder(ReminderEditPatch {
+                id: "reminder-1".to_string(),
+                title: "Whatever".to_string(),
+                raw_input: "in 1h whatever".to_string(),
+                scheduled_at: "2026-05-22T13:30:00.000Z".to_string(),
+                timezone: "Asia/Jakarta".to_string(),
+                reminder_type: "main".to_string(),
+                tags: vec![
+                    "#Kerja".to_string(),
+                    "kerja".to_string(),
+                    "  rapat tim ".to_string(),
+                    "2".to_string(),
+                ],
+                checklist: vec![],
+                recurrence: None,
+                updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+            })
+            .expect("reminder is edited");
 
-        assert!(result.is_err());
+        // "#Kerja" → "kerja"; the duplicate collapses; spaces are dropped from
+        // "rapat tim"; a leading-digit "2" is not a tag at all.
+        assert_eq!(updated.tags, vec!["kerja", "rapattim"]);
+    }
+
+    #[test]
+    fn serialize_tags_caps_the_list() {
+        let many: Vec<String> = ["a", "b", "c", "d", "e", "f", "g"]
+            .iter()
+            .map(|t| t.to_string())
+            .collect();
+
+        assert_eq!(
+            serialize_tags(&many).expect("serializes"),
+            r#"["a","b","c","d","e"]"#
+        );
+    }
+
+    #[test]
+    fn normalize_tag_rejects_non_letter_starts_and_empties() {
+        assert_eq!(normalize_tag("#skripsi"), Some("skripsi".to_string()));
+        assert_eq!(normalize_tag("saham-bbca"), Some("saham-bbca".to_string()));
+        // Trailing separators are trimmed, not kept.
+        assert_eq!(normalize_tag("kerja__"), Some("kerja".to_string()));
+        assert_eq!(normalize_tag("2"), None);
+        assert_eq!(normalize_tag("#"), None);
+        assert_eq!(normalize_tag("   "), None);
+        // Unicode letters are allowed, so Indonesian tags round-trip.
+        assert_eq!(normalize_tag("#Ulangan"), Some("ulangan".to_string()));
     }
 
     #[test]
@@ -1659,6 +1741,12 @@ mod tests {
         // Simulate a v1 DB: reminder_nodes WITHOUT recurrence_json, a row, and a
         // recorded version-1 migration. Then run migrate() and confirm the
         // column is added and the existing row still loads.
+        //
+        // The seeded table carries `tags_json`, not the real v1 `category`: v4
+        // deliberately ships no category→tags backfill (pre-launch, one DB in
+        // existence), so a genuine v1 row is not loadable by design. What this
+        // test pins is the recurrence_json ALTER — the state-based `column_exists`
+        // guard that a version-skipping user cannot miss.
         let connection = Connection::open_in_memory().expect("opens");
         connection
             .execute_batch(
@@ -1678,7 +1766,7 @@ mod tests {
                   timezone TEXT NOT NULL,
                   reminder_type TEXT NOT NULL,
                   status TEXT NOT NULL,
-                  category TEXT NOT NULL,
+                  tags_json TEXT NOT NULL,
                   parent_id TEXT,
                   previous_id TEXT,
                   next_id TEXT,
@@ -1694,12 +1782,12 @@ mod tests {
                 INSERT INTO schema_migrations (version, name) VALUES (1, 'base_reminder_nodes');
                 INSERT INTO reminder_nodes (
                   id, title, raw_input, scheduled_at, timezone, reminder_type, status,
-                  category, checklist_json, confidence, created_at, updated_at,
+                  tags_json, checklist_json, confidence, created_at, updated_at,
                   created_on_device_id, sync_version
                 ) VALUES (
                   'legacy-1', 'Old reminder', 'in 30m old reminder',
                   '2026-05-22T12:30:00.000Z', 'Asia/Jakarta', 'main', 'pending',
-                  'uncategorized', '["logs"]', 0.9, '2026-05-22T12:00:00.000Z',
+                  '[]', '["logs"]', 0.9, '2026-05-22T12:00:00.000Z',
                   '2026-05-22T12:00:00.000Z', 'device-1', 0
                 );
                 "#,
@@ -2039,38 +2127,42 @@ mod tests {
     }
 
     #[test]
-    fn sets_a_reminder_category() {
+    fn sets_reminder_tags() {
         let store = ReminderStore::open_in_memory().expect("store opens");
         store
             .create_reminder(sample_reminder("r1"))
             .expect("reminder is created");
 
         let updated = store
-            .set_reminder_category(ReminderCategoryPatch {
+            .set_reminder_tags(ReminderTagsPatch {
                 id: "r1".to_string(),
-                category: "investing".to_string(),
+                tags: vec!["saham".to_string(), "#Riset".to_string()],
                 updated_at: "2026-05-22T13:00:00.000Z".to_string(),
             })
-            .expect("category is set");
+            .expect("tags are set");
 
-        assert_eq!(updated.category, "investing");
+        assert_eq!(updated.tags, vec!["saham", "riset"]);
         assert_eq!(updated.sync_version, 1);
     }
 
     #[test]
-    fn set_category_rejects_unknown() {
+    fn set_tags_can_clear_them() {
+        // Untagging is a normal operation, not an error — an empty list is how
+        // the chain view's "clear tags" works.
         let store = ReminderStore::open_in_memory().expect("store opens");
         store
             .create_reminder(sample_reminder("r1"))
             .expect("reminder is created");
 
-        let result = store.set_reminder_category(ReminderCategoryPatch {
-            id: "r1".to_string(),
-            category: "not-a-category".to_string(),
-            updated_at: "2026-05-22T13:00:00.000Z".to_string(),
-        });
+        let updated = store
+            .set_reminder_tags(ReminderTagsPatch {
+                id: "r1".to_string(),
+                tags: vec![],
+                updated_at: "2026-05-22T13:00:00.000Z".to_string(),
+            })
+            .expect("tags are cleared");
 
-        assert!(result.is_err());
+        assert!(updated.tags.is_empty());
     }
 
     fn sample_reminder(id: &str) -> ReminderNode {
@@ -2084,7 +2176,7 @@ mod tests {
             timezone: "Asia/Jakarta".to_string(),
             reminder_type: "main".to_string(),
             status: "pending".to_string(),
-            category: "uncategorized".to_string(),
+            tags: vec![],
             parent_id: None,
             previous_id: None,
             next_id: None,

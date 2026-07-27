@@ -6,8 +6,8 @@ mod shortcut;
 use std::sync::Mutex;
 
 use data::{
-    AdvanceRecurrencePatch, ChainNode, FireRecord, MovePatch, ReminderCategoryPatch,
-    ReminderEditPatch, ReminderNode, ReminderStatusPatch, ReminderStore,
+    AdvanceRecurrencePatch, ChainNode, FireRecord, MovePatch, ReminderEditPatch, ReminderNode,
+    ReminderStatusPatch, ReminderStore, ReminderTagsPatch,
 };
 use std::collections::HashMap;
 use tauri::{LogicalSize, Manager};
@@ -140,16 +140,16 @@ fn list_reminder_chains(state: tauri::State<'_, AppState>) -> Result<Vec<ChainNo
 }
 
 #[tauri::command]
-fn set_reminder_node_category(
+fn set_reminder_node_tags(
     state: tauri::State<'_, AppState>,
-    patch: ReminderCategoryPatch,
+    patch: ReminderTagsPatch,
 ) -> Result<ReminderNode, String> {
     let store = state
         .reminders
         .lock()
         .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
 
-    store.set_reminder_category(patch)
+    store.set_reminder_tags(patch)
 }
 
 #[tauri::command]
@@ -391,7 +391,7 @@ pub fn run() {
             update_reminder_node,
             move_reminder_node,
             list_reminder_chains,
-            set_reminder_node_category,
+            set_reminder_node_tags,
             delete_reminder_node,
             advance_reminder_recurrence,
             get_reminder_fire_records,

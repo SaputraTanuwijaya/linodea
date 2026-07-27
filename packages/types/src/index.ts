@@ -18,17 +18,54 @@ export const REMINDER_STATUSES = [
 
 export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
 
-export const REMINDER_CATEGORIES = [
-  "university",
-  "investing",
-  "personal",
-  "tutoring",
-  "urgent",
-  "waiting",
-  "uncategorized",
-] as const;
+/**
+ * Tags replaced the old closed `ReminderCategory` enum (university / investing /
+ * personal / tutoring / urgent / waiting). That set was one person's life, not a
+ * taxonomy: it had near-zero recall for anyone else, and it mixed two axes —
+ * domains (university) with states (urgent, waiting) — so a reminder that was
+ * both had to arbitrarily pick one. Tags are free text the user authors, so
+ * there is nothing to guess and nothing to generalize.
+ */
 
-export type ReminderCategory = (typeof REMINDER_CATEGORIES)[number];
+/** Max characters in one tag, after normalization. */
+export const TAG_MAX_LENGTH = 24;
+
+/** Max tags stored on one reminder. Keeps a row's tag strip readable. */
+export const MAX_TAGS_PER_REMINDER = 5;
+
+/**
+ * Canonical form of a user-authored tag: lowercased, leading `#` stripped,
+ * punctuation and spaces dropped (`-` and `_` survive), length-capped. Letters
+ * are matched by Unicode class, not `a-z`, so Indonesian tags are first-class.
+ *
+ * Returns null when nothing usable is left, or when the result doesn't start
+ * with a letter — `#2` in "buy #2 pencil" must stay part of the title rather
+ * than become a tag named "2".
+ */
+export function normalizeTag(raw: string): string | null {
+  const stripped = raw.trim().replace(/^#+/, "").toLowerCase();
+  let kept = "";
+  for (const char of stripped) {
+    if (/[\p{L}\p{N}]/u.test(char) || char === "-" || char === "_") kept += char;
+  }
+  const tag = kept.slice(0, TAG_MAX_LENGTH).replace(/^[-_]+|[-_]+$/g, "");
+  return tag && /^\p{L}/u.test(tag) ? tag : null;
+}
+
+/**
+ * Normalize a list of tags: drop unusable ones, dedupe (first spelling wins),
+ * and cap at `MAX_TAGS_PER_REMINDER`. Order is preserved, so `tags[0]` stays
+ * the tag the user typed first — the chain view groups on it.
+ */
+export function normalizeTags(raw: readonly string[]): string[] {
+  const tags = new Set<string>();
+  for (const value of raw) {
+    const tag = normalizeTag(value);
+    if (tag) tags.add(tag);
+    if (tags.size >= MAX_TAGS_PER_REMINDER) break;
+  }
+  return [...tags];
+}
 
 export const NOTIFICATION_MODES = [
   "quiet",
@@ -69,7 +106,8 @@ export interface ReminderNode {
   timezone: IanaTimezone;
   type: ReminderType;
   status: ReminderStatus;
-  category: ReminderCategory;
+  /** Normalized, deduped, `#`-less. `tags[0]` is the chain view's grouping key. */
+  tags: string[];
   parentId?: ReminderNodeId;
   previousId?: ReminderNodeId;
   nextId?: ReminderNodeId;
@@ -104,7 +142,7 @@ export type ReminderPatch = Partial<
     | "timezone"
     | "type"
     | "status"
-    | "category"
+    | "tags"
     | "parentId"
     | "previousId"
     | "nextId"
@@ -142,7 +180,8 @@ export interface ParsedReminderDraft {
   scheduledAt?: IsoDateTimeString;
   timezone: IanaTimezone;
   type: ReminderType;
-  category: ReminderCategory;
+  /** `#tag` tokens found in the input, normalized. Empty when none were typed. */
+  tags: string[];
   checklist: string[];
   confidence: number;
   recurrence?: Recurrence;
@@ -239,10 +278,6 @@ export function isReminderType(value: unknown): value is ReminderType {
 
 export function isReminderStatus(value: unknown): value is ReminderStatus {
   return isOneOf(REMINDER_STATUSES, value);
-}
-
-export function isReminderCategory(value: unknown): value is ReminderCategory {
-  return isOneOf(REMINDER_CATEGORIES, value);
 }
 
 export function isNotificationMode(value: unknown): value is NotificationMode {

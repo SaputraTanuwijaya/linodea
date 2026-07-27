@@ -78,18 +78,18 @@ export interface Strings {
   chain: {
     queued: string;
     empty: string;
-    setCategory: string;
+    setTags: string;
+    /** Header for the section holding reminders with no tags. */
+    untagged: string;
+    /** Placeholder in the retag popover's input. */
+    tagInput: string;
+    /** Menu row that removes every tag from a reminder. */
+    clearTags: string;
     clear: string;
   };
-  category: {
-    university: string;
-    investing: string;
-    personal: string;
-    tutoring: string;
-    urgent: string;
-    waiting: string;
-    uncategorized: string;
-  };
+  // A `category` block used to sit here with six translated names. Tags are
+  // user-authored text, so there is nothing to translate — the tag itself is
+  // the label, in whatever language the user typed it.
   settings: {
     appearance: { title: string; hint: string };
     notifications: { title: string; hint: (max: number) => string };
@@ -262,6 +262,9 @@ const STRINGS: Record<LanguageId, Strings> = {
       "tomorrow 9am call the dentist",
       "in 2 hours pick up the laundry",
       "in 3 days at 10am pay the electricity bill",
+      // The rotating placeholders are the only discovery path for `#tag` until
+      // the capture bar grows tag autocomplete.
+      "tomorrow 2pm team standup #work",
     ],
     preview: {
       saving: "Saving...",
@@ -289,18 +292,12 @@ const STRINGS: Record<LanguageId, Strings> = {
     },
     chain: {
       queued: "Chains",
-      empty: "No reminders yet. Capture a few and they'll group here by category.",
-      setCategory: "Change category",
+      empty: "No reminders yet. Capture a few and they'll group here by tag.",
+      setTags: "Change tags",
+      untagged: "Untagged",
+      tagInput: "Add a tag…",
+      clearTags: "Remove tags",
       clear: "Clear completed",
-    },
-    category: {
-      university: "University",
-      investing: "Investing",
-      personal: "Personal",
-      tutoring: "Tutoring",
-      urgent: "Urgent",
-      waiting: "Waiting",
-      uncategorized: "Uncategorized",
     },
     settings: {
       appearance: {
@@ -511,6 +508,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       "besok jam 9 telepon dokter gigi",
       "2 jam lagi ambil cucian",
       "lusa jam 10 bayar tagihan listrik",
+      "besok jam 2 siang rapat tim #kerja",
     ],
     preview: {
       saving: "Menyimpan...",
@@ -538,18 +536,12 @@ const STRINGS: Record<LanguageId, Strings> = {
     },
     chain: {
       queued: "Rantai",
-      empty: "Belum ada pengingat. Tangkap beberapa dan akan dikelompokkan di sini per kategori.",
-      setCategory: "Ubah kategori",
+      empty: "Belum ada pengingat. Tangkap beberapa dan akan dikelompokkan di sini per tag.",
+      setTags: "Ubah tag",
+      untagged: "Tanpa tag",
+      tagInput: "Tambah tag…",
+      clearTags: "Hapus tag",
       clear: "Bersihkan selesai",
-    },
-    category: {
-      university: "Kuliah",
-      investing: "Investasi",
-      personal: "Pribadi",
-      tutoring: "Les",
-      urgent: "Mendesak",
-      waiting: "Menunggu",
-      uncategorized: "Tanpa kategori",
     },
     settings: {
       appearance: {
