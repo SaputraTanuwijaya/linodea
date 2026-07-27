@@ -41,3 +41,4 @@ export {
   startReminderNotificationScheduler,
   type ReminderNotificationScheduler,
 } from "./lib/scheduler";
+export { useReminderScheduler } from "./model/useReminderScheduler";
