@@ -26,7 +26,8 @@ const CONFIRM_EVENT: &str = "linodea:confirm";
 // hit targets (they were reported as hard to click, and since S72 they are the
 // only path to completing a reminder).
 const ALERT_SIZE: (f64, f64) = (360.0, 140.0);
-const TIMER_SIZE: (f64, f64) = (220.0, 120.0);
+// 120 -> 136: the progress bar under the digits needs the extra row.
+const TIMER_SIZE: (f64, f64) = (220.0, 136.0);
 const CONFIRM_SIZE: (f64, f64) = (380.0, 200.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
 const BOTTOM_RIGHT_MARGIN: f64 = 16.0;
@@ -135,6 +136,11 @@ pub struct TimerPayload {
 /// alert, it never steals focus. A new countdown replaces the shown one.
 pub fn show_timer(app: &AppHandle, payload: TimerPayload) -> tauri::Result<()> {
     let window = timer_window(app)?;
+    // Same reason as the alert: set the size here so TIMER_SIZE is the single
+    // source of truth for the window and the positioning math. Without this the
+    // real size came from tauri.conf.json while TIMER_SIZE only positioned it —
+    // two numbers free to drift, which they did when the progress bar was added.
+    let _ = window.set_size(LogicalSize::new(TIMER_SIZE.0, TIMER_SIZE.1));
     let _ = position_bottom_right(&window, TIMER_SIZE);
     let _ = app.emit_to(TIMER_WINDOW_LABEL, TIMER_EVENT, payload);
     window.show()?;

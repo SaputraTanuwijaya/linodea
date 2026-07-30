@@ -50,6 +50,8 @@ body,
      --lin-danger-bg   : destructive hover background
      --lin-warning     : attention text (Overdue tag)
      --lin-warning-bg  : attention tag background
+     --lin-timer-track : countdown progress bar, unelapsed portion
+     --lin-timer-fill  : countdown progress bar gradient (cool -> hot)
    --------------------------------------------------------------- */
 
 :root,
@@ -80,6 +82,17 @@ body,
   --lin-tag-5: rgb(248 113 113);
   --lin-tag-6: rgb(148 163 184);
   --lin-tag-none: rgb(113 113 122);
+
+  /* Countdown progress bar. The gradient is laid across the FULL track, not the
+     filled part, so a colour means a fixed point in the countdown: the leading
+     edge cools-to-hot as the due time approaches. */
+  --lin-timer-track: rgb(63 63 70);
+  --lin-timer-fill: linear-gradient(
+    90deg,
+    rgb(139 92 246) 0%,
+    rgb(236 72 153) 55%,
+    rgb(249 115 22) 100%
+  );
   color-scheme: dark;
 }
 
@@ -104,5 +117,14 @@ body,
   --lin-tag-5: rgb(220 38 38);
   --lin-tag-6: rgb(100 116 139);
   --lin-tag-none: rgb(113 113 122);
+
+  /* Deeper stops so the bar holds contrast against the light surface. */
+  --lin-timer-track: rgb(228 228 231);
+  --lin-timer-fill: linear-gradient(
+    90deg,
+    rgb(124 58 237) 0%,
+    rgb(219 39 119) 55%,
+    rgb(234 88 12) 100%
+  );
   color-scheme: light;
 }

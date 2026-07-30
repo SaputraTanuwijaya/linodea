@@ -9,6 +9,13 @@
  * It is purely a display: the reminder scheduler still owns firing the alert at
  * the exact instant. At zero the window just hides itself; `✕` dismisses early
  * (the reminder still fires). A new `/countdown` replaces the shown timer.
+ *
+ * A progress bar under the digits shows elapsed-vs-remaining at a glance, since
+ * a number alone doesn't say whether 5 minutes is nearly-done or barely-started.
+ * Its span is measured from when the payload arrives rather than from a field on
+ * the payload: the window is shown *because* the countdown just started, so
+ * receipt time is the start, not an approximation of it. That keeps the Rust IPC
+ * contract untouched.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -28,6 +35,8 @@ interface TimerPayload {
 export function TimerPage() {
   const [timer, setTimer] = useState<TimerPayload | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** When the shown countdown began — the instant its payload arrived. */
+  const [startedAt, setStartedAt] = useState(() => Date.now());
   const strings = useMemo(() => stringsFor(getStoredLanguage()), []);
 
   // Receive new countdowns. A fresh one replaces whatever is showing.
@@ -37,6 +46,7 @@ export function TimerPage() {
     void listen<TimerPayload>(TIMER_EVENT, (event) => {
       setTimer(event.payload);
       setNow(Date.now());
+      setStartedAt(Date.now());
     }).then((fn) => {
       if (mounted) unlisten = fn;
       else fn();
@@ -64,6 +74,12 @@ export function TimerPage() {
     }
   }, [timer, remainingMs]);
 
+  // How much of this countdown has run. Guarded against a zero-length span
+  // (a `/countdown` whose target is already here) so it can't divide by zero.
+  const totalMs = timer ? timer.targetMs - startedAt : 0;
+  const elapsedPercent =
+    totalMs > 0 ? Math.min(100, Math.max(0, ((totalMs - remainingMs) / totalMs) * 100)) : 100;
+
   if (!timer || remainingMs <= 0) return null;
 
   function dismiss() {
@@ -90,6 +106,19 @@ export function TimerPage() {
         <p className="text-center font-mono text-3xl font-semibold tabular-nums text-[var(--lin-text)]">
           {formatRemaining(remainingMs)}
         </p>
+        <div
+          aria-hidden
+          className="h-1.5 w-full overflow-hidden rounded-full"
+          style={{ background: "var(--lin-timer-fill)" }}
+        >
+          {/* The gradient sits on the track; this masks the not-yet-elapsed
+              part, so the visible colour marks a fixed point in the countdown
+              instead of being stretched by the fill width. */}
+          <div
+            className="ml-auto h-full rounded-l-full bg-[var(--lin-timer-track)] transition-[width] duration-1000 ease-linear"
+            style={{ width: `${100 - elapsedPercent}%` }}
+          />
+        </div>
         <p className="truncate text-center text-xs text-[var(--lin-text-dim)]">
           {timer.title}
         </p>
