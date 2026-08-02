@@ -24,7 +24,6 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { parseAnchorLink, parseReminder } from "@linodea/parser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -63,7 +62,13 @@ import {
 } from "@/entities/reminder";
 import { FEEDBACK_FORM_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
-import { formatDateTime, getDeviceId, isTauriRuntime, playUiSound } from "@/shared/lib";
+import {
+  formatDateTime,
+  getDeviceId,
+  isTauriRuntime,
+  openFeedbackForm,
+  playUiSound,
+} from "@/shared/lib";
 
 const CAPTURE_DEFAULT_HEIGHT = 130;
 const CAPTURE_MENU_BASE_HEIGHT = 150;
@@ -295,7 +300,7 @@ export function CapturePage({
     setCaret(0);
     focusInput(ref.current);
     if (FEEDBACK_FORM_URL && isTauriRuntime()) {
-      void openUrl(FEEDBACK_FORM_URL).catch(() => undefined);
+      void openFeedbackForm();
     }
   }
 

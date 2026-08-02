@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { FEEDBACK_FORM_URL, KO_FI_URL, SAWERIA_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
-import { isTauriRuntime } from "@/shared/lib";
+import { isTauriRuntime, openFeedbackForm } from "@/shared/lib";
 
 export function SupportSection({ strings }: { strings: Strings }) {
   async function open(url: string) {
@@ -62,7 +62,7 @@ export function SupportSection({ strings }: { strings: Strings }) {
           <LinkButton
             accent
             label={strings.support.feedbackButton}
-            onOpen={() => void open(FEEDBACK_FORM_URL)}
+            onOpen={() => void openFeedbackForm()}
             soonLabel={strings.support.comingSoon}
             url={FEEDBACK_FORM_URL}
           />

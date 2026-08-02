@@ -6,5 +6,6 @@
 
 export { formatDateTime } from "./datetime";
 export { getDeviceId } from "./device";
+export { openFeedbackForm } from "./feedback";
 export { isTauriRuntime } from "./runtime";
 export { playUiSound } from "./sounds";
