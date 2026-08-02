@@ -107,6 +107,8 @@ The parser falls back to fuzzy matching when an exact regex misses. Uses Damerau
 
 **Threshold rule**: edit distance ≤1 for words ≤4 chars, ≤2 for longer. Keeps short keywords like `jam` from absorbing unrelated 3-letter words.
 
+**Minimum-length rule (v1.4)**: a vocabulary word must be **≥5 characters** to be fuzzy-matched at all by the scanners that sweep the whole input (date words, checklist cues, type cues). At 4 letters the one-edit neighbourhood is full of *other real words* rather than typos, and each of these was a live defect: `lupa`→`lusa` pushed "jangan lupa" two days late, `baca`→`bawa` and `buku`/`bukan`→`buka` destroyed titles, `oven`/`pen`→`open` swallowed words. Short cues (`lusa`, `bawa`, `buka`, `open`, `due`) still match **exactly** — only the guessing is withdrawn. The Indonesian time markers and checklist conjunctions keep short-word fuzzy because they are positionally guarded (adjacent to `jam N`, interior-only), which is the constraint short vocabularies actually need.
+
 **What gets fuzzy-matched in v1**:
 - Date words (`today`, `hari ini`, `tomorrow`, `besok`, `lusa`)
 - Checklist cues (`bring`, `bawa`, `prepare`, `siapin`, `open`, `buka`)

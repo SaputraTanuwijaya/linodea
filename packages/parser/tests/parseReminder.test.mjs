@@ -111,9 +111,12 @@ test("autocorrects a transposition typo in an English date word (tomrorow -> tom
   assert.equal(autocorrect.corrected, "tomorrow");
 });
 
-test("autocorrects a typo in a checklist cue (bwa -> bawa)", () => {
+test("autocorrects a typo in a checklist cue (brnig -> bring)", () => {
+  // Was `bwa -> bawa` until the short-vocabulary guard: `bawa` is 4 letters,
+  // and at that length a one-edit neighbour is another real word far more often
+  // than a typo (`baca`, `bawah`). Fuzzy is now reserved for 5+ letter cues.
   const result = parseReminderWithNow(
-    "besok jam 8 lab session bwa laptop dan charger",
+    "besok jam 8 lab session brnig laptop dan charger",
     options,
   );
 
@@ -122,11 +125,69 @@ test("autocorrects a typo in a checklist cue (bwa -> bawa)", () => {
   assert.deepEqual(result.draft.checklist, ["laptop", "charger"]);
 
   const autocorrect = result.issues.find(
-    (i) => i.code === "autocorrect" && i.corrected === "bawa",
+    (i) => i.code === "autocorrect" && i.corrected === "bring",
   );
-  assert.ok(autocorrect, "expected an autocorrect issue for bwa -> bawa");
-  assert.equal(autocorrect.original.toLowerCase(), "bwa");
+  assert.ok(autocorrect, "expected an autocorrect issue for brnig -> bring");
+  assert.equal(autocorrect.original.toLowerCase(), "brnig");
 });
+
+// Short vocabulary words are matched EXACTLY — never fuzzily. Each of these was
+// a live defect: a common everyday word sat one edit from a 4-letter keyword,
+// so the parser silently ate it, and in the `lupa` case moved the reminder two
+// days. `jangan lupa` is the commonest phrasing in an Indonesian reminder, and
+// "check the oven" is one of the app's own placeholder examples.
+for (const { input, title, scheduledAt } of [
+  {
+    // lupa !-> lusa. No date word, so this resolves to TODAY at 08:00 — which
+    // is the point: the bug pushed it to the 24th.
+    input: "jam 8 jangan lupa telepon ibu",
+    title: "jangan lupa telepon ibu",
+    scheduledAt: "2026-05-22T01:00:00.000Z",
+  },
+  {
+    input: "besok jam 8 baca laporan", // baca !-> bawa
+    title: "baca laporan",
+    scheduledAt: "2026-05-23T01:00:00.000Z",
+  },
+  {
+    input: "besok jam 8 beli buku", // buku !-> buka
+    title: "beli buku",
+    scheduledAt: "2026-05-23T01:00:00.000Z",
+  },
+  {
+    input: "besok jam 9 bukan rapat biasa", // bukan !-> buka
+    title: "bukan rapat biasa",
+    scheduledAt: "2026-05-23T02:00:00.000Z",
+  },
+  {
+    input: "besok jam 7 cuci baju di bawah", // bawah !-> bawa
+    title: "cuci baju di bawah",
+    scheduledAt: "2026-05-23T00:00:00.000Z",
+  },
+  {
+    input: "tomorrow 8am check the oven", // oven !-> open
+    title: "check the oven",
+    scheduledAt: "2026-05-23T01:00:00.000Z",
+  },
+  {
+    input: "tomorrow 8am buy a pen", // pen !-> open
+    title: "buy a pen",
+    scheduledAt: "2026-05-23T01:00:00.000Z",
+  },
+]) {
+  test(`a short keyword's neighbour stays an ordinary word: ${input}`, () => {
+    const result = parseReminderWithNow(input, options);
+
+    assert.equal(result.draft.title, title);
+    assert.equal(result.draft.scheduledAt, scheduledAt);
+    assert.deepEqual(result.draft.checklist, []);
+    assert.equal(
+      result.issues.filter((i) => i.code === "autocorrect").length,
+      0,
+      `${input} must not autocorrect anything`,
+    );
+  });
+}
 
 test("clean input gets zero autocorrect issues (regression guard)", () => {
   const result = parseReminderWithNow(

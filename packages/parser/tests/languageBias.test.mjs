@@ -71,7 +71,7 @@ const baseOptions = {
 
 test("parseReminderWithNow: preferredLanguage='auto' preserves existing behavior", () => {
   const result = parseReminderWithNow(
-    "besko jam 8 lab session bwa laptop dan charger",
+    "besko jam 8 lab session brnig laptop dan charger",
     { ...baseOptions, preferredLanguage: "auto" },
   );
   // Same expectations as the original typo-tolerance integration test.

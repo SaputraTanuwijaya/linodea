@@ -36,6 +36,39 @@ import { findFuzzyTokenMatch, fuzzyMatch, tokenize } from "./fuzzy.js";
  */
 const distanceOneOnly = () => 1;
 
+/**
+ * Minimum length for a vocabulary word to be eligible for FUZZY matching.
+ *
+ * Distance-1 on a 4-letter word is not typo tolerance, it is a collision — the
+ * neighbourhood of a short word is full of *other real words*, not typos:
+ *
+ *   `lusa` ← `lupa`   "jangan lupa" (don't forget), the commonest phrase in an
+ *                     Indonesian reminder, silently scheduled two days late
+ *   `bawa` ← `baca`   "baca laporan" lost its whole title to a checklist
+ *   `buka` ← `buku`   "beli buku" lost the book
+ *   `open` ← `oven`   "check the oven" — one of the app's own placeholders
+ *   `open` ← `pen`    "buy a pen"
+ *
+ * At 5+ letters a one-edit neighbour is far more likely to be a genuine typo
+ * than a different word, so fuzzy stays on there (`besok`, `tomorrow`, `bring`,
+ * `siapin`, `prepare`, `sebelum`, `deadline`). Short words still match exactly;
+ * only the *guessing* is withdrawn.
+ *
+ * This applies to the scanners that sweep the whole input and consume text —
+ * date words, checklist cues, type cues. The Indonesian time markers and the
+ * checklist conjunctions keep their short-word fuzzy because they are already
+ * positionally guarded (adjacent to `jam N`, and interior-only respectively),
+ * which is the constraint short vocabularies actually need.
+ */
+const MIN_FUZZY_LENGTH = 5;
+
+/** Vocabulary words long enough to risk a fuzzy match. See MIN_FUZZY_LENGTH. */
+function fuzzyCandidates(vocab: readonly VocabularyEntry[]): string[] {
+  return vocab
+    .map((entry) => entry.word)
+    .filter((word) => word.length >= MIN_FUZZY_LENGTH);
+}
+
 export type { LangTag, VocabularyEntry } from "./vocabularies.js";
 
 /**
@@ -873,7 +906,7 @@ function findDateOffset(
   }
 
   // Fuzzy fallback — catches typos like `besko`, `tomrorow`, `hri ini`.
-  const fuzzy = findFuzzyTokenMatch(input, wordsOf(DATE_WORDS));
+  const fuzzy = findFuzzyTokenMatch(input, fuzzyCandidates(DATE_WORDS));
   if (!fuzzy) return undefined;
 
   if ("ambiguous" in fuzzy) {
@@ -1263,7 +1296,7 @@ function detectReminderType(
   ];
 
   for (const { vocab, type, kind } of groups) {
-    const fuzzy = findFuzzyTokenMatch(input, wordsOf(vocab));
+    const fuzzy = findFuzzyTokenMatch(input, fuzzyCandidates(vocab));
     if (!fuzzy) continue;
     if ("ambiguous" in fuzzy) {
       const biased = resolveByLanguage(
@@ -1337,7 +1370,7 @@ function extractChecklist(
   }
 
   // Fuzzy fallback — catches typos like `brnig laptop`, `bwa laptop`, `prperae slides`.
-  const fuzzy = findFuzzyTokenMatch(input, wordsOf(CHECKLIST_CUES));
+  const fuzzy = findFuzzyTokenMatch(input, fuzzyCandidates(CHECKLIST_CUES));
   if (!fuzzy) return { titleSource: input, checklist: [], issues: [] };
 
   if ("ambiguous" in fuzzy) {
