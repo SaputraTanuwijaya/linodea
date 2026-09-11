@@ -70,11 +70,13 @@ import {
   playUiSound,
 } from "@/shared/lib";
 
-const CAPTURE_DEFAULT_HEIGHT = 130;
-const CAPTURE_MENU_BASE_HEIGHT = 150;
-const SLASH_COMMAND_ROW_HEIGHT = 58;
-const ANCHOR_PICKER_ROW_HEIGHT = 40;
-const MAX_VISIBLE_ANCHORS = 5;
+import {
+  CAPTURE_DEFAULT_HEIGHT,
+  anchorPopupHeight,
+  popupCeiling,
+  slashListHeightFor,
+  slashPopupHeight,
+} from "./popupLayout";
 
 /** Slash commands that switch popup mode instead of inserting text — same
  * targets as the ••• menu, reached from the keyboard. Keyed by command name. */
@@ -213,14 +215,14 @@ export function CapturePage({
   // Grow the popup while any dropdown is open so it isn't clipped; restore on
   // close. Capture mode only — list/settings own their own height.
   const menuOpen = slash.isOpen || anchorPicking;
+  // Screen height doesn't change while the popup is up, so measure once. The
+  // ceiling is what stops a tall dropdown from growing off the bottom of the
+  // screen, where its last rows used to be silently invisible.
+  const ceiling = useMemo(popupCeiling, []);
+  const slashListHeight = slashListHeightFor(slash.suggestions.length, ceiling);
   const expandedCaptureHeight = slash.isOpen
-    ? CAPTURE_MENU_BASE_HEIGHT +
-      38 +
-      slash.suggestions.length * SLASH_COMMAND_ROW_HEIGHT
-    : CAPTURE_MENU_BASE_HEIGHT +
-      42 +
-      Math.max(1, Math.min(filteredAnchors.length, MAX_VISIBLE_ANCHORS)) *
-        ANCHOR_PICKER_ROW_HEIGHT;
+    ? slashPopupHeight(slashListHeight)
+    : anchorPopupHeight(filteredAnchors.length, ceiling);
   useEffect(() => {
     if (
       !isTauriRuntime() ||
@@ -674,6 +676,7 @@ export function CapturePage({
           </div>
         ) : slash.isOpen ? (
           <SlashCommandMenu
+            maxListHeight={slashListHeight}
             onPick={chooseCommand}
             selectedIndex={slash.selectedIndex}
             strings={strings}

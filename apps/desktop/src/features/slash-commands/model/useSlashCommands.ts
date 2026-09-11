@@ -77,6 +77,15 @@ export function useSlashCommands(
     setSelectedIndex(0);
   }, [token]);
 
+  // Re-arm the menu as soon as the caret leaves slash context. The dismissal is
+  // keyed on the token's *text*, and the capture page stays mounted across
+  // hide/show — so without this, one Esc at a bare `/` suppressed that exact
+  // token for the rest of the app's life: clearing the input and typing `/`
+  // again reproduced the dismissed string and the menu silently stayed shut.
+  useEffect(() => {
+    if (!token.startsWith("/")) setDismissedToken(null);
+  }, [token]);
+
   const isOpen =
     token.startsWith("/") && suggestions.length > 0 && dismissedToken !== token;
 
