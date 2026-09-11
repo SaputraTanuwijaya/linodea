@@ -81,13 +81,17 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 
 ## Non-Goals
 
-- No cloud sync in the MVP.
-- No backend in the MVP.
-- No mobile app in the MVP.
+- No cloud sync, no account, and no server that holds your reminders.
 - No mandatory or bundled AI dependency.
 - No calendar replacement.
 - No kanban board.
 - No workspace or team productivity suite.
+
+A phone companion is planned for 0.2.x, and it is deliberately not sync. Android only,
+receive-only: the desktop hands a reminder's schedule to the phone once, and the phone's
+own alarm fires it — with the PC switched off and the phone offline. Nothing runs a server
+on your behalf at reminder time. The handoff happens over your own network by default;
+anything else will be opt-in, off by default, and unable to read what it carries.
 
 ## Planned Stack
 
