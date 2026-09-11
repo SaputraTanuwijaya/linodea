@@ -15,8 +15,9 @@ error cue. The popup auto-hides on focus loss. Tray icon and close-to-tray remai
 queued reminders with per-row done / snooze / edit / delete. Add `#tag` anywhere in a capture to
 organize it — the chain view groups reminders by tag, and a node's dot opens a small editor to
 retag it. Settings use a category
-navigator for theme, language, configurable prealerts, launch-on-startup, optional
-AI Assist, updates, and a Support section with donation and feedback links. Linodea
+navigator for theme, language, configurable prealerts, alert presence,
+launch-on-startup, optional AI Assist, updates, and a Support section with donation
+and feedback links. Linodea
 checks for a newer version shortly after it starts and
 always asks before downloading and restarting; the same check can be run by hand from
 Settings. `/ai` opens Gemini setup and `/feedback` opens the feedback form in the
@@ -26,7 +27,10 @@ AI setup links directly to Google AI Studio, keeps connected credentials collaps
 and reserves provider choices for future adapters without presenting them as available.
 Reminders fire user-set
 prealerts plus a due-time alert in a custom Linodea notification window (with Done /
-Snooze and a short ping), scheduled by a precise in-process timer. Relative reminders snap to the
+Snooze and a ping), scheduled by a precise in-process timer. How hard that alert tries
+to get your attention is one setting: Subtle, Normal or Insistent moves its size,
+volume, how long it waits and how often it pings together, and each level has a
+preview button. Relative reminders snap to the
 minute; add `/countdown` to keep exact-second timing for short countdowns.
 
 ## Architecture
