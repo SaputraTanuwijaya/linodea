@@ -10,6 +10,7 @@
  */
 
 import { aiAssistSettingsSection } from "@/features/ai-assist";
+import { alertsSettingsSection } from "@/features/alerts";
 import { appUpdateSettingsSection } from "@/features/app-update";
 import { themeSettingsSection } from "@/features/theme";
 import { languageSettingsSection } from "@/features/language";
@@ -21,6 +22,7 @@ import type { SettingsSectionDescriptor } from "@/shared/settings";
 export const SETTINGS_SECTIONS: SettingsSectionDescriptor[] = [
   themeSettingsSection,
   prealertsSettingsSection,
+  alertsSettingsSection,
   languageSettingsSection,
   startupSettingsSection,
   aiAssistSettingsSection,

@@ -13,6 +13,7 @@
 import { useMemo } from "react";
 
 import { useAiAssist } from "@/features/ai-assist";
+import { useAlertPresence } from "@/features/alerts";
 import { useAppUpdate } from "@/features/app-update";
 import { useLanguage } from "@/features/language";
 import { usePrealerts } from "@/features/prealerts";
@@ -25,6 +26,7 @@ export function useAppSettings() {
   const [theme, setTheme] = useTheme();
   const [language, setLanguage] = useLanguage();
   const [prealertConfig, setPrealertConfig] = usePrealerts();
+  const [alertPresence, setAlertPresence] = useAlertPresence();
   const [autostart, setAutostart] = useAutostart();
   const aiAssist = useAiAssist();
   // Owns its own background check + download. Nothing here drives it; the shell
@@ -42,6 +44,7 @@ export function useAppSettings() {
       theme: { value: theme, set: setTheme },
       language: { value: language, set: setLanguage },
       prealerts: { value: prealertConfig, set: setPrealertConfig },
+      alertPresence: { value: alertPresence, set: setAlertPresence },
       autostart: { value: autostart, set: setAutostart },
       aiAssist,
       appUpdate,
@@ -54,6 +57,8 @@ export function useAppSettings() {
       setLanguage,
       prealertConfig,
       setPrealertConfig,
+      alertPresence,
+      setAlertPresence,
       autostart,
       setAutostart,
       aiAssist,

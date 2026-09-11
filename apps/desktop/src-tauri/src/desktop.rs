@@ -25,7 +25,24 @@ const CONFIRM_EVENT: &str = "linodea:confirm";
 // Grown from 360x120 in v0.1.2: the 30s dwell needs room for larger Snooze/Done
 // hit targets (they were reported as hard to click, and since S72 they are the
 // only path to completing a reminder).
-const ALERT_SIZE: (f64, f64) = (360.0, 140.0);
+/// Alert window size per presence level (see `features/alerts`). Rust owns the
+/// window, so it owns these; everything rendered inside the card is set by the
+/// webview from the same presence value. "Subtle" is the pre-S84 size, which
+/// early users reported as too small to actually remind them — hence a larger
+/// default and a level above it.
+const ALERT_SIZE_SUBTLE: (f64, f64) = (360.0, 140.0);
+const ALERT_SIZE_NORMAL: (f64, f64) = (440.0, 158.0);
+const ALERT_SIZE_INSISTENT: (f64, f64) = (520.0, 186.0);
+
+/// Size for a presence level, defaulting to normal for anything unrecognized
+/// (an older payload, or a value the webview failed to read).
+fn alert_size(presence: Option<&str>) -> (f64, f64) {
+    match presence {
+        Some("subtle") => ALERT_SIZE_SUBTLE,
+        Some("insistent") => ALERT_SIZE_INSISTENT,
+        _ => ALERT_SIZE_NORMAL,
+    }
+}
 // 120 -> 136: the progress bar under the digits needs the extra row.
 const TIMER_SIZE: (f64, f64) = (220.0, 136.0);
 const CONFIRM_SIZE: (f64, f64) = (380.0, 200.0);
@@ -95,6 +112,9 @@ pub struct AlertPayload {
     pub kind: String,
     pub lead_minutes: Option<u32>,
     pub when_ms: i64,
+    /// "subtle" | "normal" | "insistent". Optional so an alert can still be
+    /// shown without it; `alert_size` falls back to normal.
+    pub presence: Option<String>,
 }
 
 /// Show the custom alert window bottom-right, carrying `payload`. Deliberately
@@ -109,10 +129,11 @@ pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
     let _ = hide_timer(app);
 
     let window = alert_window(app)?;
-    // Size is set here so ALERT_SIZE stays the single source of truth for both
-    // the window and the positioning math below.
-    let _ = window.set_size(LogicalSize::new(ALERT_SIZE.0, ALERT_SIZE.1));
-    let _ = position_bottom_right(&window, ALERT_SIZE);
+    // Size is set here so the presence table stays the single source of truth
+    // for both the window and the positioning math below.
+    let size = alert_size(payload.presence.as_deref());
+    let _ = window.set_size(LogicalSize::new(size.0, size.1));
+    let _ = position_bottom_right(&window, size);
     let _ = app.emit_to(ALERT_WINDOW_LABEL, NOTIFY_EVENT, payload);
     window.show()?;
     raise_to_top(&window);
@@ -424,11 +445,35 @@ fn main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{marker_answered, startup_action, write_marker, StartupAction};
+    use super::{
+        alert_size, marker_answered, startup_action, write_marker, StartupAction,
+        ALERT_SIZE_INSISTENT, ALERT_SIZE_NORMAL, ALERT_SIZE_SUBTLE,
+    };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     // The install-time reliability contract, one assertion per input combo.
+
+    #[test]
+    fn alert_size_follows_presence_and_defaults_to_normal() {
+        assert_eq!(alert_size(Some("subtle")), ALERT_SIZE_SUBTLE);
+        assert_eq!(alert_size(Some("normal")), ALERT_SIZE_NORMAL);
+        assert_eq!(alert_size(Some("insistent")), ALERT_SIZE_INSISTENT);
+        // A payload from before presence existed, or one carrying a value this
+        // build doesn't know, must still show a usable card.
+        assert_eq!(alert_size(None), ALERT_SIZE_NORMAL);
+        assert_eq!(alert_size(Some("")), ALERT_SIZE_NORMAL);
+        assert_eq!(alert_size(Some("deafening")), ALERT_SIZE_NORMAL);
+    }
+
+    #[test]
+    fn alert_sizes_grow_with_presence() {
+        // The whole point of the setting: each step up is visibly bigger.
+        assert!(ALERT_SIZE_NORMAL.0 > ALERT_SIZE_SUBTLE.0);
+        assert!(ALERT_SIZE_NORMAL.1 > ALERT_SIZE_SUBTLE.1);
+        assert!(ALERT_SIZE_INSISTENT.0 > ALERT_SIZE_NORMAL.0);
+        assert!(ALERT_SIZE_INSISTENT.1 > ALERT_SIZE_NORMAL.1);
+    }
 
     #[test]
     fn boot_launch_stays_hidden_regardless_of_prompt_state() {

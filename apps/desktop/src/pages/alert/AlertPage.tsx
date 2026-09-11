@@ -22,10 +22,14 @@
  *
  * Dwell/sound policy (v0.1.2): since S72 removed silent auto-completion, these
  * buttons are the ONLY way a reminder gets marked done — so the card has to
- * survive long enough to actually reach. It stays 30s, pings up to three times
- * (alarm-like, not nagging), and pauses entirely while the pointer is over it
- * so it can't vanish mid-reach. Any hover also silences the remaining pings:
- * once you've clearly seen it, it shuts up.
+ * survive long enough to actually reach. It pauses entirely while the pointer
+ * is over it so it can't vanish mid-reach, and any hover silences the
+ * remaining pings: once you've clearly seen it, it shuts up.
+ *
+ * How long it stays, how loud and how often it pings, and how big the type is
+ * all come from the payload's `presence` (S84) — one user-facing dial, since
+ * early feedback was that the card was both too quiet and too small to work as
+ * a reminder. Rust sizes the window from the same value.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -33,18 +37,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { clearReminderFireRecord, updateReminderNodeStatus } from "@/entities/reminder";
+import { alertProfile, type AlertPresence } from "@/features/alerts";
 import { getStoredLanguage } from "@/features/language";
 import { stringsFor } from "@/shared/i18n";
 import { formatDateTime, playUiSound } from "@/shared/lib";
 
 const NOTIFY_EVENT = "linodea:notify";
-const AUTO_DISMISS_MS = 30_000;
-/**
- * Extra pings after the one on show, as ms from show. Deliberately stops at 20s
- * so the final 10s are silent — the card closing isn't punctuated by a ping,
- * and three total reads as an alarm rather than nagging.
- */
-const PING_REPEAT_MS = [10_000, 20_000];
 const SNOOZE_MS = 10 * 60_000;
 const MAX_QUEUE = 8;
 
@@ -54,6 +52,8 @@ interface AlertPayload {
   kind: "due" | "prealert";
   leadMinutes?: number;
   whenMs: number;
+  /** Absent on an alert queued before this shipped; `alertProfile` defaults. */
+  presence?: AlertPresence;
 }
 
 export function AlertPage() {
@@ -64,6 +64,9 @@ export function AlertPage() {
   const pingTimersRef = useRef<number[]>([]);
   const strings = useMemo(() => stringsFor(getStoredLanguage()), []);
   const current = queue[0];
+  // Per-card, not per-window: a queued alert keeps the presence it was fired
+  // with even if the setting changed while it waited.
+  const profile = alertProfile(current?.presence);
 
   /** Cancel any pings not yet played. Called once the user clearly has seen it. */
   function silencePings() {
@@ -97,9 +100,10 @@ export function AlertPage() {
   // pausing on hover doesn't restart the ping sequence from zero.
   useEffect(() => {
     if (!current) return;
-    playUiSound("notification");
-    const ids = PING_REPEAT_MS.map((delay) =>
-      window.setTimeout(() => playUiSound("notification"), delay),
+    const { pingRepeatMs, volume } = alertProfile(current.presence);
+    playUiSound("notification", volume);
+    const ids = pingRepeatMs.map((delay) =>
+      window.setTimeout(() => playUiSound("notification", volume), delay),
     );
     pingTimersRef.current = ids;
     return () => {
@@ -118,7 +122,10 @@ export function AlertPage() {
       return;
     }
     if (paused) return;
-    const id = window.setTimeout(() => setQueue((q) => q.slice(1)), AUTO_DISMISS_MS);
+    const id = window.setTimeout(
+      () => setQueue((q) => q.slice(1)),
+      alertProfile(current.presence).dwellMs,
+    );
     return () => window.clearTimeout(id);
   }, [current, paused]);
 
@@ -161,15 +168,17 @@ export function AlertPage() {
   const body =
     current.kind === "due"
       ? strings.notificationBody.due(
-          current.title,
           formatDateTime(new Date(current.whenMs).toISOString()),
         )
-      : strings.notificationBody.prealert(current.title, current.leadMinutes ?? 0);
+      : strings.notificationBody.prealert(current.leadMinutes ?? 0);
 
   return (
     <main className="flex h-screen w-screen items-stretch bg-transparent p-2">
       <div
-        className="flex w-full flex-col justify-between rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] px-4 py-3 shadow-2xl"
+        // Centered with a fixed gap rather than spread to the edges: at the
+        // larger sizes `justify-between` left a dead band between the text and
+        // the buttons, which read as a broken card rather than a bigger one.
+        className={`flex w-full flex-col justify-center gap-3 rounded-2xl border border-[var(--lin-border)] bg-[var(--lin-bg)] shadow-2xl ${profile.padClass}`}
         onPointerEnter={() => {
           silencePings();
           setPaused(true);
@@ -177,21 +186,25 @@ export function AlertPage() {
         onPointerLeave={() => setPaused(false)}
       >
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-[var(--lin-text)]">
+          <p
+            className={`text-[var(--lin-text)] ${profile.titleClampClass} ${profile.titleClass}`}
+          >
             {current.title}
           </p>
-          <p className="truncate text-xs text-[var(--lin-text-dim)]">{body}</p>
+          <p className={`truncate text-[var(--lin-text-dim)] ${profile.bodyClass}`}>
+            {body}
+          </p>
         </div>
         <div className="flex items-center justify-end gap-2.5">
           {queue.length > 1 ? (
-            <span className="mr-auto text-xs text-[var(--lin-text-mute)]">
+            <span className={`mr-auto text-[var(--lin-text-mute)] ${profile.bodyClass}`}>
               +{queue.length - 1}
             </span>
           ) : null}
           {current.kind === "prealert" ? (
             // A prealert is a heads-up — a single Dismiss that touches nothing.
             <button
-              className="h-9 rounded-md border border-[var(--lin-border)] px-4 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+              className={`rounded-md border border-[var(--lin-border)] font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)] ${profile.buttonClass}`}
               onClick={handleDismiss}
               type="button"
             >
@@ -203,14 +216,14 @@ export function AlertPage() {
             // of what makes them easier to hit correctly under time pressure.
             <>
               <button
-                className="h-9 rounded-md border border-[var(--lin-border)] px-4 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+                className={`rounded-md border border-[var(--lin-border)] font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)] ${profile.buttonClass}`}
                 onClick={handleSnooze}
                 type="button"
               >
                 {strings.list.snooze}
               </button>
               <button
-                className="h-9 rounded-md bg-[var(--lin-accent)] px-4 text-xs font-semibold text-[var(--lin-bg)] transition hover:opacity-90"
+                className={`rounded-md bg-[var(--lin-accent)] font-semibold text-[var(--lin-bg)] transition hover:opacity-90 ${profile.buttonClass}`}
                 onClick={handleDone}
                 type="button"
               >

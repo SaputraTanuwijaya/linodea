@@ -93,6 +93,17 @@ export interface Strings {
   settings: {
     appearance: { title: string; hint: string };
     notifications: { title: string; hint: (max: number) => string };
+    alerts: {
+      title: string;
+      hint: string;
+      preview: string;
+      previewTitle: string;
+      footnote: string;
+      levels: Record<
+        "subtle" | "normal" | "insistent",
+        { name: string; description: string }
+      >;
+    };
     language: { title: string; hint: string };
     startup: { title: string; hint: string };
     ai: { title: string; hint: string };
@@ -114,11 +125,17 @@ export interface Strings {
     /** Pure formatter: returns "1 day before" / "2 hours before" etc. */
     describe: (minutes: number) => string;
   };
+  /**
+   * Second line of the alert card. The card renders the reminder's title on
+   * its own line above this, so these deliberately do NOT repeat it — they
+   * used to, a leftover from when the same strings fed an OS toast (where the
+   * title slot is the app name).
+   */
   notificationBody: {
-    /** Body for the T-due toast. */
-    due: (title: string, when: string) => string;
-    /** Body for prealert toasts. Takes minutes-of-lead so the formatter can localize the unit phrase. */
-    prealert: (title: string, leadMinutes: number) => string;
+    /** Subtitle for the T-due card. */
+    due: (when: string) => string;
+    /** Subtitle for a prealert card. Takes minutes-of-lead so the formatter can localize the unit phrase. */
+    prealert: (leadMinutes: number) => string;
   };
   startup: {
     toggleLabel: string;
@@ -307,7 +324,29 @@ const STRINGS: Record<LanguageId, Strings> = {
       notifications: {
         title: "Notifications",
         hint: (max) =>
-          `Get reminded ahead of time. Up to ${max} prealerts; the reminder auto-marks done at its due time.`,
+          `Get reminded ahead of time. Up to ${max} prealerts; the reminder itself still waits for you to mark it done.`,
+      },
+      alerts: {
+        title: "Alerts",
+        hint: "How hard a reminder tries to get your attention when it fires.",
+        preview: "Preview",
+        previewTitle: "This is how an alert looks",
+        footnote:
+          "Preview shows a real alert. It is only a sample — nothing is scheduled or completed.",
+        levels: {
+          subtle: {
+            name: "Subtle",
+            description: "Small card, one quiet ping, closes after 20s.",
+          },
+          normal: {
+            name: "Normal",
+            description: "Bigger card, three pings, closes after 30s.",
+          },
+          insistent: {
+            name: "Insistent",
+            description: "Largest card, six pings, stays a full minute.",
+          },
+        },
       },
       language: {
         title: "Language",
@@ -345,8 +384,8 @@ const STRINGS: Record<LanguageId, Strings> = {
       describe: (minutes) => describeEnglish(minutes),
     },
     notificationBody: {
-      due: (title, when) => `${title} - ${when}`,
-      prealert: (title, leadMinutes) => `In ${leadEnglish(leadMinutes)}: ${title}`,
+      due: (when) => `Due ${when}`,
+      prealert: (leadMinutes) => `In ${leadEnglish(leadMinutes)}`,
     },
     startup: {
       toggleLabel: "Launch on startup",
@@ -551,7 +590,29 @@ const STRINGS: Record<LanguageId, Strings> = {
       notifications: {
         title: "Notifikasi",
         hint: (max) =>
-          `Dapat pengingat lebih awal. Maksimal ${max} pengingat awal; pengingat ditandai selesai otomatis saat waktunya tiba.`,
+          `Dapat pengingat lebih awal. Maksimal ${max} pengingat awal; pengingatnya sendiri tetap menunggu kamu tandai selesai.`,
+      },
+      alerts: {
+        title: "Peringatan",
+        hint: "Seberapa keras pengingat berusaha menarik perhatianmu saat waktunya tiba.",
+        preview: "Coba",
+        previewTitle: "Beginilah tampilan peringatan",
+        footnote:
+          "Tombol Coba menampilkan peringatan sungguhan. Hanya contoh — tidak ada yang dijadwalkan atau diselesaikan.",
+        levels: {
+          subtle: {
+            name: "Halus",
+            description: "Kartu kecil, satu bunyi pelan, tertutup setelah 20 detik.",
+          },
+          normal: {
+            name: "Normal",
+            description: "Kartu lebih besar, tiga bunyi, tertutup setelah 30 detik.",
+          },
+          insistent: {
+            name: "Mendesak",
+            description: "Kartu terbesar, enam bunyi, bertahan satu menit penuh.",
+          },
+        },
       },
       language: {
         title: "Bahasa",
@@ -589,8 +650,8 @@ const STRINGS: Record<LanguageId, Strings> = {
       describe: (minutes) => describeIndonesian(minutes),
     },
     notificationBody: {
-      due: (title, when) => `${title} - ${when}`,
-      prealert: (title, leadMinutes) => `Dalam ${leadIndonesian(leadMinutes)}: ${title}`,
+      due: (when) => `Waktunya ${when}`,
+      prealert: (leadMinutes) => `Dalam ${leadIndonesian(leadMinutes)}`,
     },
     startup: {
       toggleLabel: "Jalankan saat startup",

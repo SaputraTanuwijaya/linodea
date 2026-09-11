@@ -22,6 +22,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { addRecurrenceInterval } from "@linodea/parser";
 import type { ReminderNode } from "@linodea/types";
 
+import { getStoredAlertPresence } from "@/features/alerts";
 import { getStoredPrealerts, sortDescending } from "@/features/prealerts";
 
 import {
@@ -45,8 +46,14 @@ interface AlertPayload {
   whenMs: number;
 }
 
+/** Stamp the presence level at fire time — read from storage the same way the
+ *  prealert config is, since this driver runs outside React. Rust sizes the
+ *  window from it and the alert webview renders from it, so a card keeps the
+ *  level it fired with even if the setting changes while it sits in the queue. */
 function showAlert(payload: AlertPayload): void {
-  void invoke("show_alert", { payload }).catch(() => undefined);
+  void invoke("show_alert", {
+    payload: { ...payload, presence: getStoredAlertPresence() },
+  }).catch(() => undefined);
 }
 
 // Legacy localStorage keys, kept only for the one-time migration into SQLite.
