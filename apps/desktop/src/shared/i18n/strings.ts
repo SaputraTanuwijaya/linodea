@@ -371,8 +371,8 @@ const STRINGS: Record<LanguageId, Strings> = {
         hint: "Interface language and parser tie-break preference.",
       },
       phoneLink: {
-        title: "Phone link",
-        hint: "Let your phone reach this computer over your own network, so reminders can be handed to it. Off until you turn it on.",
+        title: "Phone",
+        hint: "Hand reminders to your phone over your own network, so it can remind you when you are away from this computer. Everything here is set up on this computer. Off until you turn it on.",
       },
       startup: {
         title: "Startup",
@@ -405,7 +405,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       noAddresses:
         "No network address found. Is this computer connected to Wi-Fi or Ethernet?",
       firewallNote:
-        "Windows may ask to allow Linodea through the firewall the first time. Allow it, including on public networks, or your phone cannot connect.",
+        "The first time, Windows will ask on this computer whether to allow Linodea through the firewall. Tick both Private and Public networks -- your Wi-Fi is often classed as Public, and blocking it looks exactly like the phone being unable to connect.",
       error: (detail) => `Could not start: ${detail}`,
       pairHeading: "Paired phones",
       pairHint:
@@ -663,8 +663,8 @@ const STRINGS: Record<LanguageId, Strings> = {
         hint: "Bahasa antarmuka dan preferensi parser saat ada ambiguitas.",
       },
       phoneLink: {
-        title: "Sambungan HP",
-        hint: "Izinkan HP-mu menjangkau komputer ini lewat jaringanmu sendiri, supaya pengingat bisa dikirim ke sana. Mati sampai kamu nyalakan.",
+        title: "HP",
+        hint: "Kirim pengingat ke HP-mu lewat jaringanmu sendiri, supaya HP bisa mengingatkan saat kamu jauh dari komputer ini. Semua pengaturannya ada di komputer ini. Mati sampai kamu nyalakan.",
       },
       startup: {
         title: "Saat dimulai",
@@ -697,7 +697,7 @@ const STRINGS: Record<LanguageId, Strings> = {
       noAddresses:
         "Alamat jaringan tidak ditemukan. Apakah komputer ini tersambung ke Wi-Fi atau Ethernet?",
       firewallNote:
-        "Windows mungkin meminta izin firewall untuk Linodea saat pertama kali. Izinkan, termasuk untuk jaringan publik, atau HP-mu tidak bisa terhubung.",
+        "Pertama kali, Windows akan bertanya di komputer ini apakah Linodea boleh lewat firewall. Centang Private dan Public -- Wi-Fi sering dianggap Public, dan kalau diblokir gejalanya persis seperti HP yang tidak bisa terhubung.",
       error: (detail) => `Tidak bisa memulai: ${detail}`,
       pairHeading: "HP yang terhubung",
       pairHint:
