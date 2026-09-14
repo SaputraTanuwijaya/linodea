@@ -105,6 +105,7 @@ export interface Strings {
       >;
     };
     language: { title: string; hint: string };
+    phoneLink: { title: string; hint: string };
     startup: { title: string; hint: string };
     ai: { title: string; hint: string };
     updates: { title: string; hint: string };
@@ -113,6 +114,15 @@ export interface Strings {
   themes: {
     dark: { name: string; description: string };
     light: { name: string; description: string };
+  };
+  phoneLink: {
+    toggleLabel: string;
+    toggleHint: string;
+    testHeading: string;
+    testHint: string;
+    noAddresses: string;
+    firewallNote: string;
+    error: (detail: string) => string;
   };
   prealerts: {
     addButton: string;
@@ -352,6 +362,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Language",
         hint: "Interface language and parser tie-break preference.",
       },
+      phoneLink: {
+        title: "Phone link",
+        hint: "Let your phone reach this computer over your own network, so reminders can be handed to it. Off until you turn it on.",
+      },
       startup: {
         title: "Startup",
         hint: "Launch Linodea when you sign in so reminders keep firing without opening it manually.",
@@ -372,6 +386,19 @@ const STRINGS: Record<LanguageId, Strings> = {
     themes: {
       dark: { name: "Dark", description: "Default. Easy on the eyes for night capture." },
       light: { name: "Light", description: "Bright surface for daytime use." },
+    },
+    phoneLink: {
+      toggleLabel: "Answer on this network",
+      toggleHint:
+        "Your phone reaches this computer over Wi-Fi — never over a USB cable. Nothing leaves your network.",
+      testHeading: "Check your phone can reach this computer",
+      testHint:
+        "Open one of these on your phone's browser, connected to the same Wi-Fi. Some networks block devices from seeing each other; this tells you whether yours does.",
+      noAddresses:
+        "No network address found. Is this computer connected to Wi-Fi or Ethernet?",
+      firewallNote:
+        "Windows may ask to allow Linodea through the firewall the first time. Allow it, including on public networks, or your phone cannot connect.",
+      error: (detail) => `Could not start: ${detail}`,
     },
     prealerts: {
       addButton: "+ Add prealert",
@@ -618,6 +645,10 @@ const STRINGS: Record<LanguageId, Strings> = {
         title: "Bahasa",
         hint: "Bahasa antarmuka dan preferensi parser saat ada ambiguitas.",
       },
+      phoneLink: {
+        title: "Sambungan HP",
+        hint: "Izinkan HP-mu menjangkau komputer ini lewat jaringanmu sendiri, supaya pengingat bisa dikirim ke sana. Mati sampai kamu nyalakan.",
+      },
       startup: {
         title: "Saat dimulai",
         hint: "Jalankan Linodea otomatis saat masuk agar pengingat tetap aktif tanpa perlu dibuka manual.",
@@ -638,6 +669,19 @@ const STRINGS: Record<LanguageId, Strings> = {
     themes: {
       dark: { name: "Gelap", description: "Bawaan. Nyaman untuk malam hari." },
       light: { name: "Terang", description: "Permukaan cerah untuk siang hari." },
+    },
+    phoneLink: {
+      toggleLabel: "Jawab di jaringan ini",
+      toggleHint:
+        "HP-mu menjangkau komputer ini lewat Wi-Fi — bukan lewat kabel USB. Tidak ada yang keluar dari jaringanmu.",
+      testHeading: "Cek HP-mu bisa menjangkau komputer ini",
+      testHint:
+        "Buka salah satu alamat ini di browser HP, tersambung ke Wi-Fi yang sama. Sebagian jaringan memblokir perangkat agar tidak saling melihat; ini memberitahu apakah jaringanmu begitu.",
+      noAddresses:
+        "Alamat jaringan tidak ditemukan. Apakah komputer ini tersambung ke Wi-Fi atau Ethernet?",
+      firewallNote:
+        "Windows mungkin meminta izin firewall untuk Linodea saat pertama kali. Izinkan, termasuk untuk jaringan publik, atau HP-mu tidak bisa terhubung.",
+      error: (detail) => `Tidak bisa memulai: ${detail}`,
     },
     prealerts: {
       addButton: "+ Tambah pengingat awal",

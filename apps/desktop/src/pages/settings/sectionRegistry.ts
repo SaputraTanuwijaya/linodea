@@ -14,6 +14,7 @@ import { alertsSettingsSection } from "@/features/alerts";
 import { appUpdateSettingsSection } from "@/features/app-update";
 import { themeSettingsSection } from "@/features/theme";
 import { languageSettingsSection } from "@/features/language";
+import { phoneLinkSettingsSection } from "@/features/phone-link";
 import { prealertsSettingsSection } from "@/features/prealerts";
 import { startupSettingsSection } from "@/features/startup";
 import { supportSettingsSection } from "@/features/support";
@@ -23,6 +24,7 @@ export const SETTINGS_SECTIONS: SettingsSectionDescriptor[] = [
   themeSettingsSection,
   prealertsSettingsSection,
   alertsSettingsSection,
+  phoneLinkSettingsSection,
   languageSettingsSection,
   startupSettingsSection,
   aiAssistSettingsSection,

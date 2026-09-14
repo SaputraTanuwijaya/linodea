@@ -1,6 +1,7 @@
 mod ai;
 mod data;
 mod desktop;
+mod lan;
 mod shortcut;
 
 use std::sync::Mutex;
@@ -15,6 +16,33 @@ use tauri::{LogicalSize, Manager};
 struct AppState {
     reminders: Mutex<ReminderStore>,
     ai: ai::AiService,
+    /// Owns the local-network server's lifetime. Lives here rather than in a
+    /// window so the socket survives the popup being hidden -- the app runs
+    /// always-on in the tray, and that is exactly when a phone would reach it.
+    lan: lan::LanService,
+}
+
+// --- Local-network link -------------------------------------------------
+// Deliberately opt-in: starting the server binds a socket reachable by every
+// device on the network and trips a Windows Firewall prompt, neither of which
+// should happen to someone who never pairs a phone.
+
+#[tauri::command]
+fn get_lan_status(state: tauri::State<'_, AppState>) -> lan::LanStatus {
+    state.lan.status()
+}
+
+#[tauri::command]
+fn start_lan_server(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<lan::LanStatus, String> {
+    state.lan.start(app.package_info().version.to_string())
+}
+
+#[tauri::command]
+fn stop_lan_server(state: tauri::State<'_, AppState>) -> lan::LanStatus {
+    state.lan.stop()
 }
 
 #[tauri::command]
@@ -356,6 +384,7 @@ pub fn run() {
             app.manage(AppState {
                 reminders: Mutex::new(store),
                 ai: ai::AiService::new(),
+                lan: lan::LanService::new(),
             });
             desktop::setup_desktop_integration(app)?;
             shortcut::setup_global_shortcut(app)?;
@@ -420,6 +449,9 @@ pub fn run() {
             dismiss_confirm,
             take_pending_confirm,
             mark_boot_prompt_answered,
+            get_lan_status,
+            start_lan_server,
+            stop_lan_server,
             quit_app
         ])
         .run(tauri::generate_context!())

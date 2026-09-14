@@ -21,6 +21,7 @@ import type { AlertPresence } from "@/features/alerts";
 import type { AppUpdateController } from "@/features/app-update";
 import type { AutostartState } from "@/features/startup";
 import type { LanguageId } from "@/features/language";
+import type { PhoneLinkController } from "@/features/phone-link";
 import type { PrealertConfig } from "@/features/prealerts";
 import type { ThemeId } from "@/features/theme";
 import type { Strings } from "@/shared/i18n";
@@ -51,6 +52,7 @@ export interface SettingsBundle {
   alertPresence: SettingsSlot<AlertPresence>;
   autostart: SettingsSlot<AutostartState, boolean>;
   aiAssist: AiAssistController;
+  phoneLink: PhoneLinkController;
   appUpdate: AppUpdateController;
 }
 

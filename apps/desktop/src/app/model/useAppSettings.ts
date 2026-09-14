@@ -16,6 +16,7 @@ import { useAiAssist } from "@/features/ai-assist";
 import { useAlertPresence } from "@/features/alerts";
 import { useAppUpdate } from "@/features/app-update";
 import { useLanguage } from "@/features/language";
+import { usePhoneLink } from "@/features/phone-link";
 import { usePrealerts } from "@/features/prealerts";
 import { useAutostart } from "@/features/startup";
 import { useTheme } from "@/features/theme";
@@ -28,6 +29,7 @@ export function useAppSettings() {
   const [prealertConfig, setPrealertConfig] = usePrealerts();
   const [alertPresence, setAlertPresence] = useAlertPresence();
   const [autostart, setAutostart] = useAutostart();
+  const phoneLink = usePhoneLink();
   const aiAssist = useAiAssist();
   // Owns its own background check + download. Nothing here drives it; the shell
   // only reads "ready" to badge the ••• button, and the Settings panel does the
@@ -47,6 +49,7 @@ export function useAppSettings() {
       alertPresence: { value: alertPresence, set: setAlertPresence },
       autostart: { value: autostart, set: setAutostart },
       aiAssist,
+      phoneLink,
       appUpdate,
     }),
     [
@@ -62,6 +65,7 @@ export function useAppSettings() {
       autostart,
       setAutostart,
       aiAssist,
+      phoneLink,
       appUpdate,
     ],
   );
