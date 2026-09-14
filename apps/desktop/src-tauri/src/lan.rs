@@ -474,6 +474,10 @@ fn serve(server: Arc<tiny_http::Server>, shared: Arc<Shared>) {
             (tiny_http::Method::Post, "/pair") => handle_pair(&mut request, &shared),
             (tiny_http::Method::Get, "/me") => handle_me(&request, &shared),
             (tiny_http::Method::Get, "/schedule") => handle_schedule(&request, &shared),
+            // The phone's own view. Serves no reminder data itself -- the page
+            // fetches `/schedule` with its stored token -- so an unpaired
+            // visitor learns nothing `/health` does not already say.
+            (tiny_http::Method::Get, "/") => html_response(200, &phone_home_page()),
             _ => json_response(404, "{\"error\":\"not found\"}"),
         };
         let _ = request.respond(response);
@@ -784,22 +788,163 @@ autocorrect=\"off\" spellcheck=\"false\" inputmode=\"text\" maxlength=\"8\" requ
     )
 }
 
+/// Stores the freshly-issued token so the phone view can authenticate.
+///
+/// The browser is the only client until the Kotlin app exists, and the token is
+/// shown exactly once — only its hash is kept on the desktop. Without this the
+/// pairing would succeed and then be unusable from the device that just did it.
+///
+/// `localStorage` is scoped to this server's origin, so nothing but these pages
+/// can read it. The token still appears in the page as text, because a person
+/// testing with `curl` needs to be able to copy it.
+const PAIRED_STORE_SCRIPT: &str = r#"
+try {
+  localStorage.setItem("linodea.deviceToken", document.getElementById("k").textContent.trim());
+  document.getElementById("go").hidden = false;
+} catch (e) {
+  document.getElementById("nostore").hidden = false;
+}
+"#;
+
 fn paired_page(name: &str, token: &str) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-<title>Paired</title><style>{PAGE_STYLE}</style></head><body><main>\
+<title>Paired</title><style>{PAGE_STYLE}{APP_STYLE}</style></head><body><main>\
 <h1>Paired</h1>\
 <p><strong>{}</strong> is now paired with this computer. It will show up in Settings \
 &rarr; Phone, where you can remove it at any time.</p>\
-<p>The Linodea app would keep this key for you. It is shown here only because a browser \
-has nowhere to store it &mdash; you do not need to write it down.</p>\
-<code>{}</code>\
-<p>Nothing is scheduled to your phone yet; that comes next.</p>\
-</main></body></html>",
+<a class=\"btn\" id=\"go\" href=\"/\" hidden>See what is scheduled</a>\
+<p id=\"nostore\" hidden>This browser will not store the key, so you will have to pair \
+again next time. Private browsing usually causes this.</p>\
+<p>This is the key this phone will use. It is shown only because a browser has nowhere \
+to put it for you &mdash; you do not need to write it down.</p>\
+<code id=\"k\">{}</code>\
+</main><script>{PAIRED_STORE_SCRIPT}</script></body></html>",
         escape_html(name),
         escape_html(token)
     )
+}
+
+/// Extra styling for the phone view. Kept apart from `PAGE_STYLE` so the
+/// pairing pages stay as small as they were.
+const APP_STYLE: &str = "body.app{place-items:start center}\
+main.wide{max-width:32rem;padding-block:24px}\
+ul{list-style:none;margin:0;padding:0}\
+li{background:#27272a;border:1px solid #3f3f46;border-radius:10px;\
+padding:12px 14px;margin:0 0 10px}\
+li.chained{border-left:3px solid #a1a1aa}\
+.t{font-size:15px;color:#f4f4f5;margin:0 0 4px}\
+.w{font-size:13px;color:#a1a1aa;margin:0}\
+.tags{margin:6px 0 0;font-size:12px;color:#71717a}\
+.muted{color:#71717a;font-style:italic}\
+.bar{display:flex;gap:10px;align-items:baseline;margin:0 0 14px}\
+.bar p{margin:0}\
+a.btn{display:block;text-align:center;text-decoration:none;width:100%;\
+box-sizing:border-box;font-size:16px;font-weight:600;padding:12px;\
+border-radius:10px;background:#e4e4e7;color:#18181b}";
+
+/// The script behind the phone view.
+///
+/// The token is held in `localStorage` and sent as a bearer header, exactly as
+/// the Kotlin app will. It is deliberately **not** put in the URL: a query
+/// parameter would land in the address bar, in history, and in anything the
+/// phone syncs from either — for a credential that never expires, that is a
+/// real weakening in exchange for nothing.
+///
+/// Rendering happens here rather than on the server because the page itself is
+/// unauthenticated. A server-rendered list would mean `GET /` could hand a
+/// reminder title to anyone on the network who opened it.
+const PHONE_APP_SCRIPT: &str = r##"
+const KEY = "linodea.deviceToken";
+const out = document.getElementById("out");
+const bar = document.getElementById("bar");
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+
+function when(ms) {
+  const d = new Date(ms);
+  const day = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return day + " · " + time;
+}
+
+async function load() {
+  const token = localStorage.getItem(KEY);
+  if (!token) {
+    out.innerHTML = '<p>This phone is not paired yet.</p><a class="btn" href="/pair">Pair this phone</a>';
+    return;
+  }
+  let res;
+  try {
+    res = await fetch("/schedule", { headers: { Authorization: "Bearer " + token } });
+  } catch (e) {
+    out.innerHTML = "<p>Could not reach the computer. Same Wi-Fi?</p>";
+    return;
+  }
+  if (res.status === 401) {
+    localStorage.removeItem(KEY);
+    out.innerHTML = '<p>This phone was removed on the computer.</p><a class="btn" href="/pair">Pair again</a>';
+    return;
+  }
+  if (!res.ok) {
+    out.innerHTML = "<p>The computer answered with an error (" + res.status + ").</p>";
+    return;
+  }
+  const data = await res.json();
+  const firing = data.reminders.filter((r) => r.fireAtMs !== null);
+  bar.textContent = firing.length
+    ? firing.length + " scheduled in the next " + data.horizonDays + " days"
+    : "Nothing scheduled in the next " + data.horizonDays + " days";
+
+  if (!data.reminders.length) {
+    out.innerHTML = "<p class='muted'>Nothing to show. Capture something on the computer and reload.</p>";
+    return;
+  }
+  out.innerHTML = "<ul>" + data.reminders.map((r) => {
+    const time = r.fireAtMs === null
+      ? "<p class='w muted'>no alarm — shown for the chain</p>"
+      : "<p class='w'>" + esc(when(r.fireAtMs)) + "</p>";
+    const rep = r.recurrence
+      ? " <span class='muted'>· repeats " + esc(r.recurrence.freq) + "</span>"
+      : "";
+    const tags = r.tags.length
+      ? "<p class='tags'>" + r.tags.map((t) => "#" + esc(t)).join(" ") + "</p>"
+      : "";
+    return "<li class='" + (r.chainId ? "chained" : "") + "'>"
+      + "<p class='t'>" + esc(r.title) + "</p>" + time + rep + tags + "</li>";
+  }).join("") + "</ul>";
+}
+
+load();
+"##;
+
+/// What a phone sees at the root of the link.
+///
+/// Serves no reminder data itself — everything is fetched by the script above
+/// with the device token, so an unpaired phone (or anyone else on the network)
+/// opening this address learns only that Linodea is running here, which
+/// `/health` already says.
+fn phone_home_page() -> String {
+    [
+        "<!doctype html><html><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+        "<title>Linodea</title><style>",
+        PAGE_STYLE,
+        APP_STYLE,
+        "</style></head><body class=\"app\"><main class=\"wide\">",
+        "<h1>Linodea</h1>",
+        "<div class=\"bar\"><p id=\"bar\">Loading…</p></div>",
+        "<div id=\"out\"></div>",
+        "</main><script>",
+        PHONE_APP_SCRIPT,
+        "</script></body></html>",
+    ]
+    .concat()
 }
 
 /// LAN-reachable IPv4 addresses, best guess first.
@@ -1625,6 +1770,71 @@ Connection: close\r\n\r\n"
         let response = fetch_with_token(status.port, "/schedule", &token);
         assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
         assert!(response.contains("\"reminders\":[]"), "got: {response}");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // --- the phone's own view ---------------------------------------------
+
+    #[test]
+    fn the_phone_view_serves_no_reminder_data_of_its_own() {
+        // The page is unauthenticated, so it must render nothing on the server.
+        // If it ever did, opening the address would hand a reminder title to
+        // anyone on the network -- which is the whole thing the token prevents.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        seed_reminder(&service, "a", "Kumpul draft skripsi", &iso_in_days(1));
+
+        let response = fetch(status.port, "/");
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(response.contains("text/html"), "a phone gets a page");
+        assert!(
+            !response.contains("Kumpul draft skripsi"),
+            "the unauthenticated page rendered a reminder: {response}"
+        );
+        // It fetches with the token instead.
+        assert!(response.contains("Bearer"), "got: {response}");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn pairing_hands_the_browser_the_token_it_will_need() {
+        // The token is shown exactly once and only its hash is kept, so if the
+        // paired page did not store it the pairing would succeed and then be
+        // useless from the very device that just completed it.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        let code = service.begin_pairing().code.expect("code is offered");
+
+        let response = post_form(
+            status.port,
+            "/pair",
+            &format!("code={code}&device=HP"),
+            true,
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(response.contains("localStorage.setItem"), "got: {response}");
+        assert!(response.contains("linodea.deviceToken"), "got: {response}");
+        // And still printed, because a person testing by hand needs to copy it.
+        assert!(response.contains("id=\"k\""), "got: {response}");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_root_is_a_page_and_unknown_paths_are_still_refused() {
+        // Adding a route at "/" must not turn the 404 into a catch-all that
+        // answers anything -- that check has guarded this server since S86.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+
+        assert!(fetch(status.port, "/").starts_with("HTTP/1.1 200"));
+        assert!(fetch(status.port, "/reminders").starts_with("HTTP/1.1 404"));
+        assert!(fetch(status.port, "/schedule/all").starts_with("HTTP/1.1 404"));
 
         service.stop();
         let _ = std::fs::remove_file(&path);
