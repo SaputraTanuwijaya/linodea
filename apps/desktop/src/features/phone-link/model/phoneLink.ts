@@ -176,3 +176,16 @@ export function preferredAddress(
   );
   return answered ?? addresses[0];
 }
+
+/**
+ * Mirror the desktop's prealert offsets into the Rust side.
+ *
+ * They live in localStorage, so the LAN server cannot read them and the phone
+ * would otherwise be told only about T-due — dropping every early warning and
+ * looking, from the phone, exactly like the alarm firing late.
+ */
+export async function pushPrealertOffsets(minutes: number[]): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("set_phone_prealerts", { minutes });
+}
+

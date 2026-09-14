@@ -29,7 +29,11 @@ export function useAppSettings() {
   const [prealertConfig, setPrealertConfig] = usePrealerts();
   const [alertPresence, setAlertPresence] = useAlertPresence();
   const [autostart, setAutostart] = useAutostart();
-  const phoneLink = usePhoneLink();
+  // Fed the prealert offsets so the phone raises the same set of alerts this
+  // machine does; Rust cannot read them from localStorage on its own.
+  const phoneLink = usePhoneLink(
+    prealertConfig.offsets.map((offset) => offset.minutes),
+  );
   const aiAssist = useAiAssist();
   // Owns its own background check + download. Nothing here drives it; the shell
   // only reads "ready" to badge the ••• button, and the Settings panel does the

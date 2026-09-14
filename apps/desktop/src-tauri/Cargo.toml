@@ -39,6 +39,10 @@ sha2 = "0.10"
 # renderer; we only need the module matrix and build the path ourselves, so the
 # crate is taken bare.
 qrcode = { version = "0.14", default-features = false }
+# Parsing `scheduled_at` into epoch millis for the phone schedule (see
+# src/schedule.rs). Already in the tree via tauri, so naming it directly adds no
+# build weight; the default features (clock, serde, wasm shims) are not needed.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = "1"

@@ -24,6 +24,7 @@ import {
   persistPhoneLinkEnabled,
   preferredAddress,
   probeAddresses,
+  pushPrealertOffsets,
   readStatus,
   readPairingState,
   startServer,
@@ -58,7 +59,14 @@ export interface PhoneLinkController {
   qr: QrImage | null;
 }
 
-export function usePhoneLink(): PhoneLinkController {
+/**
+ * @param prealertOffsetsMinutes The desktop's own early-alert offsets, mirrored
+ * down to Rust so `/schedule` can pass them on. Owned by `usePrealerts` in
+ * localStorage, which the LAN server cannot read.
+ */
+export function usePhoneLink(
+  prealertOffsetsMinutes: number[] = [],
+): PhoneLinkController {
   const [enabled, setEnabledState] = useState(getStoredPhoneLinkEnabled);
   const [status, setStatus] = useState<PhoneLinkStatus>(IDLE_STATUS);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +147,16 @@ export function usePhoneLink(): PhoneLinkController {
       setError(String(cause));
     }
   }, []);
+
+  // Keep Rust's copy of the prealert offsets in step with the setting. Keyed on
+  // the joined string and rebuilt inside the effect, because the caller maps a
+  // fresh array every render and depending on that directly would re-push
+  // forever.
+  const offsetsKey = prealertOffsetsMinutes.join(",");
+  useEffect(() => {
+    const minutes = offsetsKey ? offsetsKey.split(",").map(Number) : [];
+    void pushPrealertOffsets(minutes);
+  }, [offsetsKey]);
 
   // A code expires on its own after five minutes, so the panel polls while one
   // is open rather than showing a code that has quietly stopped working.

@@ -40,7 +40,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use crate::data::ReminderStore;
 use crate::pairing::{self, CodeCheck, PairedDevice};
+use crate::schedule;
 
 /// Preferred port. Fixed rather than ephemeral so the address stays stable
 /// across restarts — a phone that remembers where to look shouldn't be wrong
@@ -137,6 +139,11 @@ struct Shared {
     app_version: Mutex<String>,
     pending: Mutex<Option<pairing::PendingCode>>,
     devices: Mutex<Vec<PairedDevice>>,
+    /// The same store the UI commands use, so `/schedule` can never answer with
+    /// a reminder the desktop has already changed or deleted.
+    reminders: Arc<Mutex<ReminderStore>>,
+    /// Mirrored from the frontend, which owns this setting in localStorage.
+    prealert_offsets: Mutex<Vec<i64>>,
 }
 
 /// Owns the server's lifetime. Held in Tauri's managed state so the socket
@@ -147,7 +154,7 @@ pub struct LanService {
 }
 
 impl LanService {
-    pub fn new(devices_path: PathBuf) -> Self {
+    pub fn new(devices_path: PathBuf, reminders: Arc<Mutex<ReminderStore>>) -> Self {
         let devices = pairing::load_devices(&devices_path);
         Self {
             inner: Mutex::new(Running::default()),
@@ -156,8 +163,19 @@ impl LanService {
                 app_version: Mutex::new(String::new()),
                 pending: Mutex::new(None),
                 devices: Mutex::new(devices),
+                reminders,
+                prealert_offsets: Mutex::new(Vec::new()),
             }),
         }
+    }
+
+    /// Mirror the desktop's prealert configuration for `/schedule` to send on.
+    pub fn set_prealert_offsets(&self, minutes: Vec<i64>) {
+        *self
+            .shared
+            .prealert_offsets
+            .lock()
+            .expect("prealerts poisoned") = minutes;
     }
 
     /// Open a pairing window: generate a code, show it, and accept it until it
@@ -455,6 +473,7 @@ fn serve(server: Arc<tiny_http::Server>, shared: Arc<Shared>) {
             }
             (tiny_http::Method::Post, "/pair") => handle_pair(&mut request, &shared),
             (tiny_http::Method::Get, "/me") => handle_me(&request, &shared),
+            (tiny_http::Method::Get, "/schedule") => handle_schedule(&request, &shared),
             _ => json_response(404, "{\"error\":\"not found\"}"),
         };
         let _ = request.respond(response);
@@ -563,6 +582,72 @@ fn handle_me(
             escape_json(&device.name)
         ),
     )
+}
+
+/// Hand a paired phone the reminders it should raise alarms for.
+///
+/// The first endpoint that puts a user's own words on a network, so it is
+/// authenticated the same way `/me` is -- read the bearer token, look it up,
+/// refuse otherwise -- and it refuses before it reads anything from the
+/// database. An unauthenticated request must not be able to make this machine
+/// do work, let alone learn what is in it.
+///
+/// `schedule::build` decides what crosses; see that module for why.
+fn handle_schedule(
+    request: &tiny_http::Request,
+    shared: &Arc<Shared>,
+) -> tiny_http::Response<Cursor<Vec<u8>>> {
+    let Some(token) = bearer_token(request) else {
+        return json_response(401, "{\"error\":\"missing token\"}");
+    };
+
+    // Authenticate and stamp last-seen in one pass, then drop the lock before
+    // touching the database -- holding two locks in a fixed order is how this
+    // stays free of the deadlock that an interleaved stop() could otherwise
+    // cause.
+    {
+        let mut devices = shared.devices.lock().expect("devices poisoned");
+        let Some(index) = pairing::find_by_token(&devices, &token) else {
+            return json_response(401, "{\"error\":\"unknown token\"}");
+        };
+        devices[index].last_seen_ms = Some(pairing::now_ms());
+        let _ = pairing::save_devices(&shared.devices_path, &devices);
+    }
+
+    let offsets = shared
+        .prealert_offsets
+        .lock()
+        .expect("prealerts poisoned")
+        .clone();
+
+    let reminders = {
+        let store = match shared.reminders.lock() {
+            Ok(store) => store,
+            Err(_) => return json_response(500, "{\"error\":\"store unavailable\"}"),
+        };
+        match store.list_reminders() {
+            Ok(reminders) => reminders,
+            Err(error) => {
+                return json_response(500, &format!("{{\"error\":\"{}\"}}", escape_json(&error)))
+            }
+        }
+    };
+
+    let payload = schedule::build(
+        &reminders,
+        pairing::now_ms(),
+        schedule::HORIZON_DAYS,
+        offsets,
+        PROTOCOL_VERSION,
+    );
+
+    match serde_json::to_string(&payload) {
+        Ok(body) => json_response(200, &body),
+        Err(error) => json_response(
+            500,
+            &format!("{{\"error\":\"{}\"}}", escape_json(&error.to_string())),
+        ),
+    }
 }
 
 fn bearer_token(request: &tiny_http::Request) -> Option<String> {
@@ -943,7 +1028,11 @@ Connection: close\r\n\r\n"
             crate::pairing::generate_token()
         ));
         let path = crate::pairing::devices_path(&dir);
-        (LanService::new(path.clone()), path)
+        let store = crate::data::ReminderStore::in_memory().expect("in-memory store");
+        (
+            LanService::new(path.clone(), Arc::new(Mutex::new(store))),
+            path,
+        )
     }
 
     /// The whole pairing round trip the way a phone performs it: ask for a
@@ -1381,5 +1470,163 @@ Connection: close\r\n\r\n"
                 assert!(!(in_margin && *dark), "a module landed in the quiet zone");
             }
         }
+    }
+
+    // --- the schedule endpoint --------------------------------------------
+
+    fn seed_reminder(service: &LanService, id: &str, title: &str, scheduled_at: &str) {
+        let store = service.shared.reminders.lock().expect("store");
+        store
+            .create_reminder(crate::data::ReminderNode {
+                id: id.to_string(),
+                user_id: None,
+                title: title.to_string(),
+                raw_input: format!("{title} -- raw capture"),
+                description: Some("private notes".to_string()),
+                scheduled_at: scheduled_at.to_string(),
+                timezone: "Asia/Jakarta".to_string(),
+                reminder_type: "main".to_string(),
+                status: "pending".to_string(),
+                tags: vec!["skripsi".to_string()],
+                parent_id: None,
+                previous_id: None,
+                next_id: None,
+                checklist: vec!["a secret step".to_string()],
+                recurrence: None,
+                confidence: 1.0,
+                created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+                completed_at: None,
+                snoozed_until: None,
+                created_on_device_id: "desktop".to_string(),
+                sync_version: 1,
+            })
+            .expect("seeded");
+    }
+
+    /// An ISO timestamp `days` from now, so a seeded reminder is genuinely
+    /// inside the horizon at the moment the test runs.
+    fn iso_in_days(days: i64) -> String {
+        let ms = crate::pairing::now_ms() + days * 24 * 60 * 60 * 1000;
+        chrono::DateTime::from_timestamp_millis(ms)
+            .expect("in range")
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    }
+
+    fn pair_and_take_token(service: &LanService, port: u16) -> String {
+        let code = service.begin_pairing().code.expect("code is offered");
+        let response = post_form(port, "/pair", &format!("code={code}&device=HP"), false);
+        response
+            .rsplit_once("\"token\":\"")
+            .and_then(|(_, rest)| rest.split('"').next())
+            .expect("token in response")
+            .to_string()
+    }
+
+    #[test]
+    fn the_schedule_is_refused_without_a_valid_token() {
+        // The first endpoint carrying a user's own words, so this is the test
+        // that matters most: no token, a junk token and a revoked one all get
+        // nothing, and none of them learn whether the database even has rows.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        seed_reminder(&service, "a", "Kumpul draft skripsi", &iso_in_days(1));
+
+        assert!(fetch(status.port, "/schedule").starts_with("HTTP/1.1 401"));
+        let bogus = fetch_with_token(status.port, "/schedule", "not-a-real-token");
+        assert!(bogus.starts_with("HTTP/1.1 401"), "got: {bogus}");
+        assert!(!bogus.contains("skripsi"), "a refusal must reveal nothing");
+
+        let token = pair_and_take_token(&service, status.port);
+        assert!(fetch_with_token(status.port, "/schedule", &token).starts_with("HTTP/1.1 200"));
+
+        // Revoking is immediate, because every request re-reads the device list.
+        let device = service.pairing_state().devices[0].id.clone();
+        service.forget_device(&device).expect("revoked");
+        let after = fetch_with_token(status.port, "/schedule", &token);
+        assert!(after.starts_with("HTTP/1.1 401"), "got: {after}");
+        assert!(
+            !after.contains("skripsi"),
+            "a revoked phone must learn nothing"
+        );
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_paired_phone_is_sent_titles_and_times_but_never_notes() {
+        // The privacy decision, pinned at the HTTP boundary as well as in the
+        // builder -- this is the surface that actually reaches a network.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        seed_reminder(&service, "a", "Kumpul draft skripsi", &iso_in_days(1));
+        let token = pair_and_take_token(&service, status.port);
+
+        let response = fetch_with_token(status.port, "/schedule", &token);
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(response.contains("Kumpul draft skripsi"));
+        assert!(response.contains("\"fireAtMs\""));
+        assert!(response.contains("\"skripsi\""), "tags travel");
+        assert!(!response.contains("private notes"), "description leaked");
+        assert!(!response.contains("a secret step"), "checklist leaked");
+        assert!(!response.contains("raw capture"), "raw input leaked");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn pulling_the_schedule_marks_the_phone_as_seen() {
+        // Until this endpoint existed nothing authenticated after pairing, so
+        // last-seen was permanently null and "my phone stopped ringing" had no
+        // evidence either way.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        let token = pair_and_take_token(&service, status.port);
+        assert!(service.pairing_state().devices[0].last_seen_ms.is_none());
+
+        let response = fetch_with_token(status.port, "/schedule", &token);
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(service.pairing_state().devices[0].last_seen_ms.is_some());
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_desktops_prealert_offsets_reach_the_phone() {
+        // They live in localStorage, so the frontend has to hand them over. If
+        // this breaks, the phone silently drops every early warning and looks
+        // like it is firing late.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        service.set_prealert_offsets(vec![1440, 60]);
+        let token = pair_and_take_token(&service, status.port);
+
+        let response = fetch_with_token(status.port, "/schedule", &token);
+        assert!(
+            response.contains("\"prealertOffsetsMinutes\":[1440,60]"),
+            "got: {response}"
+        );
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_empty_schedule_is_an_answer_rather_than_an_error() {
+        // The phone must be able to tell "nothing scheduled" from "the request
+        // failed" -- otherwise a quiet evening looks like a broken link.
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        let token = pair_and_take_token(&service, status.port);
+
+        let response = fetch_with_token(status.port, "/schedule", &token);
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(response.contains("\"reminders\":[]"), "got: {response}");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
     }
 }

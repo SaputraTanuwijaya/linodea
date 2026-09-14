@@ -3,9 +3,10 @@ mod data;
 mod desktop;
 mod lan;
 mod pairing;
+mod schedule;
 mod shortcut;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use data::{
     AdvanceRecurrencePatch, ChainNode, FireRecord, MovePatch, ReminderEditPatch, ReminderNode,
@@ -15,7 +16,10 @@ use std::collections::HashMap;
 use tauri::{LogicalSize, Manager};
 
 struct AppState {
-    reminders: Mutex<ReminderStore>,
+    /// Shared with the LAN server: its worker thread answers `/schedule` off
+    /// the same database the UI commands use, so a phone can never be told
+    /// something the desktop has already changed.
+    reminders: Arc<Mutex<ReminderStore>>,
     ai: ai::AiService,
     /// Owns the local-network server's lifetime. Lives here rather than in a
     /// window so the socket survives the popup being hidden -- the app runs
@@ -54,6 +58,16 @@ async fn probe_lan_addresses(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<lan::AddressProbe>, String> {
     Ok(state.lan.probe_addresses())
+}
+
+/// Tell the LAN server which early alerts the desktop fires.
+///
+/// Prealert offsets live in `localStorage` (known issue #7), so Rust cannot
+/// read them and the frontend has to hand them over. Without this the phone
+/// would fire only at T-due and look like it was dropping every early warning.
+#[tauri::command]
+fn set_phone_prealerts(state: tauri::State<'_, AppState>, minutes: Vec<i64>) {
+    state.lan.set_prealert_offsets(minutes);
 }
 
 /// Encode any short string as QR path data. Kept general rather than named for
@@ -423,14 +437,18 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
+            let reminders = Arc::new(Mutex::new(store));
             app.manage(AppState {
-                reminders: Mutex::new(store),
+                reminders: Arc::clone(&reminders),
                 ai: ai::AiService::new(),
-                lan: lan::LanService::new(pairing::devices_path(
-                    &app.path()
-                        .app_data_dir()
-                        .map_err(|error| std::io::Error::other(error.to_string()))?,
-                )),
+                lan: lan::LanService::new(
+                    pairing::devices_path(
+                        &app.path()
+                            .app_data_dir()
+                            .map_err(|error| std::io::Error::other(error.to_string()))?,
+                    ),
+                    reminders,
+                ),
             });
             desktop::setup_desktop_integration(app)?;
             shortcut::setup_global_shortcut(app)?;
@@ -499,6 +517,7 @@ pub fn run() {
             start_lan_server,
             stop_lan_server,
             probe_lan_addresses,
+            set_phone_prealerts,
             encode_qr,
             get_pairing_state,
             begin_pairing,

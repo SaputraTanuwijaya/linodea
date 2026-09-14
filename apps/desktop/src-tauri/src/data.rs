@@ -227,6 +227,23 @@ impl ReminderStore {
         Ok(store)
     }
 
+    /// An empty, migrated store on a private in-memory database.
+    ///
+    /// For tests in other modules that need a real store but have no Tauri
+    /// `AppHandle` to open one from. `#[cfg(test)]` so it never widens the
+    /// production surface: nothing shipping should be able to create a store
+    /// whose contents vanish when the process exits.
+    #[cfg(test)]
+    pub fn in_memory() -> Result<Self, String> {
+        let connection = Connection::open_in_memory().map_err(to_store_error)?;
+        let store = Self {
+            connection,
+            database_path: PathBuf::from(":memory:"),
+        };
+        store.migrate()?;
+        Ok(store)
+    }
+
     /// Copy the database aside before a schema upgrade.
     ///
     /// Before auto-update, a migration only ran when a build was launched by
