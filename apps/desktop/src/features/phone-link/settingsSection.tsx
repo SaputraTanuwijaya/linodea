@@ -13,7 +13,11 @@ function PhoneLinkSettingsContent({ bundle }: { bundle: SettingsBundle }) {
       busy={link.busy}
       enabled={link.enabled}
       error={link.error}
+      onBeginPairing={() => void link.beginPairing()}
+      onCancelPairing={() => void link.cancelPairing()}
       onEnabledChange={(next) => void link.setEnabled(next)}
+      onForgetDevice={(id) => void link.forgetDevice(id)}
+      pairing={link.pairing}
       status={link.status}
       strings={bundle.strings}
     />

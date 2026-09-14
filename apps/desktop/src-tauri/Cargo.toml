@@ -31,6 +31,10 @@ tauri-plugin-opener = "2"
 # is cheaper in complexity than pulling an async stack into the module.
 tiny_http = "0.12"
 if-addrs = "0.13"
+# Pairing (see src/pairing.rs). Both are already in the tree transitively, so
+# naming them directly adds no new build weight.
+rand = "0.9"
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = "1"

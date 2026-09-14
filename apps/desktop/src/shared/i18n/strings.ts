@@ -123,6 +123,14 @@ export interface Strings {
     noAddresses: string;
     firewallNote: string;
     error: (detail: string) => string;
+    pairHeading: string;
+    pairHint: string;
+    pairStart: string;
+    pairCancel: string;
+    pairInstructions: (url: string) => string;
+    lastSeen: (when: string) => string;
+    neverSeen: string;
+    forget: string;
   };
   prealerts: {
     addButton: string;
@@ -399,6 +407,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       firewallNote:
         "Windows may ask to allow Linodea through the firewall the first time. Allow it, including on public networks, or your phone cannot connect.",
       error: (detail) => `Could not start: ${detail}`,
+      pairHeading: "Paired phones",
+      pairHint:
+        "Start pairing, then type the code on your phone. The code lasts five minutes and works once.",
+      pairStart: "Start pairing",
+      pairCancel: "Cancel",
+      pairInstructions: (url) => `On your phone, open ${url} and type this code:`,
+      lastSeen: (when) => `Last seen ${when}`,
+      neverSeen: "Not seen yet",
+      forget: "Remove",
     },
     prealerts: {
       addButton: "+ Add prealert",
@@ -682,6 +699,15 @@ const STRINGS: Record<LanguageId, Strings> = {
       firewallNote:
         "Windows mungkin meminta izin firewall untuk Linodea saat pertama kali. Izinkan, termasuk untuk jaringan publik, atau HP-mu tidak bisa terhubung.",
       error: (detail) => `Tidak bisa memulai: ${detail}`,
+      pairHeading: "HP yang terhubung",
+      pairHint:
+        "Mulai penyandingan, lalu ketik kodenya di HP. Kode berlaku lima menit dan hanya sekali pakai.",
+      pairStart: "Mulai sandingkan",
+      pairCancel: "Batal",
+      pairInstructions: (url) => `Di HP-mu, buka ${url} lalu ketik kode ini:`,
+      lastSeen: (when) => `Terakhir terlihat ${when}`,
+      neverSeen: "Belum terlihat",
+      forget: "Hapus",
     },
     prealerts: {
       addButton: "+ Tambah pengingat awal",

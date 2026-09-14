@@ -5,6 +5,9 @@
 export {
   getStoredPhoneLinkEnabled,
   healthUrl,
+  pairUrl,
+  type PairedDevice,
+  type PairingState,
   type PhoneLinkStatus,
 } from "./model/phoneLink";
 export { usePhoneLink, type PhoneLinkController } from "./model/usePhoneLink";

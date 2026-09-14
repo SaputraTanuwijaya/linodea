@@ -10,24 +10,40 @@
 
 import type { Strings } from "@/shared/i18n";
 
-import { healthUrl, type PhoneLinkStatus } from "../model/phoneLink";
+import {
+  healthUrl,
+  pairUrl,
+  type PairingState,
+  type PhoneLinkStatus,
+} from "../model/phoneLink";
 
 export function PhoneLinkSection({
   busy,
   enabled,
   error,
+  onBeginPairing,
+  onCancelPairing,
   onEnabledChange,
+  onForgetDevice,
+  pairing,
   status,
   strings,
 }: {
   busy: boolean;
   enabled: boolean;
   error: string | null;
+  onBeginPairing: () => void;
+  onCancelPairing: () => void;
   onEnabledChange: (next: boolean) => void;
+  onForgetDevice: (id: string) => void;
+  pairing: PairingState;
   status: PhoneLinkStatus;
   strings: Strings;
 }) {
   const copy = strings.phoneLink;
+  // The first address is the best guess at a reachable one (virtual adapters
+  // sort last), so it's the one worth putting in front of the user.
+  const primaryAddress = status.addresses[0];
 
   return (
     <div className="grid gap-3">
@@ -90,6 +106,78 @@ export function PhoneLinkSection({
           <p className="mt-2 text-xs leading-4 text-[var(--lin-text-mute)]">
             {copy.firewallNote}
           </p>
+        </div>
+      ) : null}
+
+      {enabled && status.running ? (
+        <div className="rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-3 py-2.5">
+          <p className="text-xs font-medium text-[var(--lin-text)]">
+            {copy.pairHeading}
+          </p>
+
+          {pairing.code ? (
+            <>
+              <p className="mt-0.5 text-xs leading-4 text-[var(--lin-text-mute)]">
+                {primaryAddress
+                  ? copy.pairInstructions(pairUrl(primaryAddress, status.port))
+                  : copy.noAddresses}
+              </p>
+              {/* Wide tracking because this is read off one screen and typed
+                  into another — the gaps are what stop characters merging. */}
+              <p className="mt-2 rounded-md bg-[var(--lin-bg)] px-3 py-3 text-center font-mono text-2xl font-semibold tracking-[0.3em] text-[var(--lin-text)]">
+                {pairing.code}
+              </p>
+              <button
+                className="mt-2 w-full rounded-md border border-[var(--lin-border)] px-3 py-1.5 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg)]"
+                onClick={onCancelPairing}
+                type="button"
+              >
+                {copy.pairCancel}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mt-0.5 text-xs leading-4 text-[var(--lin-text-mute)]">
+                {copy.pairHint}
+              </p>
+              <button
+                className="mt-2 w-full rounded-md bg-[var(--lin-accent)] px-3 py-1.5 text-xs font-semibold text-[var(--lin-bg)] transition hover:opacity-90"
+                onClick={onBeginPairing}
+                type="button"
+              >
+                {copy.pairStart}
+              </button>
+            </>
+          )}
+
+          {pairing.devices.length > 0 ? (
+            <ul className="mt-3 grid gap-1 border-t border-[var(--lin-border)] pt-2.5">
+              {pairing.devices.map((device) => (
+                <li
+                  className="flex items-center justify-between gap-2 rounded-md bg-[var(--lin-bg)] px-2.5 py-2"
+                  key={device.id}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs text-[var(--lin-text)]">
+                      {device.name}
+                    </p>
+                    <p className="truncate text-[11px] text-[var(--lin-text-mute)]">
+                      {device.lastSeenMs
+                        ? copy.lastSeen(new Date(device.lastSeenMs).toLocaleString())
+                        : copy.neverSeen}
+                    </p>
+                  </div>
+                  <button
+                    className="flex-none rounded-md border border-[var(--lin-border)] px-2.5 py-1 text-[11px] font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
+                    onClick={() => onForgetDevice(device.id)}
+                    type="button"
+                  >
+                    {copy.forget}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
     </div>

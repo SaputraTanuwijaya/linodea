@@ -2,6 +2,7 @@ mod ai;
 mod data;
 mod desktop;
 mod lan;
+mod pairing;
 mod shortcut;
 
 use std::sync::Mutex;
@@ -43,6 +44,29 @@ fn start_lan_server(
 #[tauri::command]
 fn stop_lan_server(state: tauri::State<'_, AppState>) -> lan::LanStatus {
     state.lan.stop()
+}
+
+#[tauri::command]
+fn get_pairing_state(state: tauri::State<'_, AppState>) -> lan::PairingState {
+    state.lan.pairing_state()
+}
+
+#[tauri::command]
+fn begin_pairing(state: tauri::State<'_, AppState>) -> lan::PairingState {
+    state.lan.begin_pairing()
+}
+
+#[tauri::command]
+fn cancel_pairing(state: tauri::State<'_, AppState>) -> lan::PairingState {
+    state.lan.cancel_pairing()
+}
+
+#[tauri::command]
+fn forget_paired_device(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<lan::PairingState, String> {
+    state.lan.forget_device(&id)
 }
 
 #[tauri::command]
@@ -384,7 +408,11 @@ pub fn run() {
             app.manage(AppState {
                 reminders: Mutex::new(store),
                 ai: ai::AiService::new(),
-                lan: lan::LanService::new(),
+                lan: lan::LanService::new(pairing::devices_path(
+                    &app.path()
+                        .app_data_dir()
+                        .map_err(|error| std::io::Error::other(error.to_string()))?,
+                )),
             });
             desktop::setup_desktop_integration(app)?;
             shortcut::setup_global_shortcut(app)?;
@@ -452,6 +480,10 @@ pub fn run() {
             get_lan_status,
             start_lan_server,
             stop_lan_server,
+            get_pairing_state,
+            begin_pairing,
+            cancel_pairing,
+            forget_paired_device,
             quit_app
         ])
         .run(tauri::generate_context!())
