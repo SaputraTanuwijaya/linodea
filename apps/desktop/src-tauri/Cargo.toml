@@ -35,6 +35,10 @@ if-addrs = "0.13"
 # naming them directly adds no new build weight.
 rand = "0.9"
 sha2 = "0.10"
+# Pairing QR (see src/lan.rs). Default features pull in `image` and a full SVG
+# renderer; we only need the module matrix and build the path ourselves, so the
+# crate is taken bare.
+qrcode = { version = "0.14", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = "1"

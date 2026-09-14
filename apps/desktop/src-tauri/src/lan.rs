@@ -31,11 +31,12 @@
 //! a real if small disclosure to anyone on the same network, which is part of
 //! why this is opt-in rather than always-on.
 
-use std::io::Cursor;
-use std::net::{IpAddr, TcpListener};
+use std::io::{Cursor, Read, Write};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -64,6 +65,51 @@ pub struct LanStatus {
     pub port: u16,
     pub addresses: Vec<String>,
     pub protocol_version: u32,
+}
+
+/// How long a single address gets to answer before it is called dead.
+///
+/// A reachable address on the same machine answers in single-digit milliseconds,
+/// so this is generous. It is sized for the failure case instead: a configured
+/// address on an adapter with no link can hang rather than refuse, and that hang
+/// is the whole reason the probe exists.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// The quiet zone is part of the QR spec, not decoration — scanners use it to
+/// find the code's edges, and a QR butted up against a panel border reads
+/// unreliably or not at all.
+const QUIET_ZONE: u32 = 4;
+
+/// One address and whether it actually answered.
+///
+/// **`reachable` means "this computer reached it", not "a phone can".** The
+/// probe runs from the same machine, so it catches a dead adapter — an address
+/// left behind by an unplugged Ethernet cable, a virtual switch with nothing
+/// behind it — and cannot catch client isolation or a firewall that allows
+/// Private but not Public networks, both of which are invisible from here. So a
+/// false here is conclusive and a true is only encouraging, and the panel says
+/// so rather than promising more than it knows.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressProbe {
+    pub address: String,
+    pub reachable: bool,
+}
+
+/// A QR code as SVG path data in module units.
+///
+/// Handed over as a path rather than as markup or a PNG: the frontend drops it
+/// into one `<path>` inside its own `<svg>`, which means no image encoding, no
+/// `dangerouslySetInnerHTML`, and a code that scales to any size and inverts
+/// cleanly between the two themes because the color is the caller's.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QrImage {
+    /// Side length in modules, quiet zone included — i.e. the SVG viewBox.
+    pub size: u32,
+    /// `d` attribute for a single `<path>`: one subpath per horizontal run of
+    /// dark modules, which keeps a typical pairing code to a few hundred bytes.
+    pub path: String,
 }
 
 /// What the pairing UI needs to render. The code is present only while an
@@ -169,6 +215,55 @@ impl LanService {
         }
     }
 
+    /// Ask every local address whether it actually answers.
+    ///
+    /// Exists because the address list is a list of *candidates*, not of working
+    /// endpoints, and nothing in it says which is which: S87 found an Ethernet
+    /// address that times out while Wi-Fi answers, and only string-sort luck put
+    /// the working one first. That was survivable while the panel showed a list
+    /// a person could try in turn. It stops being survivable once a QR encodes
+    /// exactly one of them, because a scan that lands on the dead address just
+    /// hangs, with no second thing to try.
+    pub fn probe_addresses(&self) -> Vec<AddressProbe> {
+        // Read and release before probing: the probe talks to our own server,
+        // and holding the lifecycle lock across a network round trip would
+        // block any concurrent stop() for the full timeout.
+        let (running, port) = {
+            let inner = self.inner.lock().expect("lan state poisoned");
+            (inner.server.is_some(), inner.port)
+        };
+
+        let addresses = local_addresses();
+        if !running {
+            return addresses
+                .into_iter()
+                .map(|address| AddressProbe {
+                    address,
+                    reachable: false,
+                })
+                .collect();
+        }
+
+        // In parallel, because a dead address costs the whole timeout and these
+        // are exactly the machines that have several: probing four in sequence
+        // would freeze the panel for six seconds to learn what takes one and a
+        // half.
+        let handles: Vec<_> = addresses
+            .into_iter()
+            .map(|address| {
+                std::thread::spawn(move || {
+                    let reachable = probe_one(&address, port, PROBE_TIMEOUT);
+                    AddressProbe { address, reachable }
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok())
+            .collect()
+    }
+
     /// Idempotent: starting an already-running server just reports where it is,
     /// so a UI that re-asserts its state on mount can't accidentally spawn two.
     pub fn start(&self, app_version: String) -> Result<LanStatus, String> {
@@ -261,6 +356,82 @@ fn bind_listener(candidates: &[u16]) -> Result<(TcpListener, u16), String> {
     Err(format!("no free port in {candidates:?} ({last_error})"))
 }
 
+/// One address, one verdict.
+///
+/// A full `GET /health` rather than a bare TCP connect: connecting proves only
+/// that something accepted, which on a machine with several adapters is not the
+/// same as proving our own server is what answered. Reading the status line
+/// costs one more round trip on an address that was going to work anyway.
+fn probe_one(address: &str, port: u16, timeout: Duration) -> bool {
+    let Ok(ip) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&SocketAddr::new(ip, port), timeout) else {
+        return false;
+    };
+    // Both directions need a deadline. A connect can succeed against a half-open
+    // path that then never sends a byte, and without a read timeout that parks
+    // the probe thread forever.
+    if stream.set_write_timeout(Some(timeout)).is_err()
+        || stream.set_read_timeout(Some(timeout)).is_err()
+    {
+        return false;
+    }
+
+    let request =
+        format!("GET /health HTTP/1.1\r\nHost: {address}:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    // Exactly the length of "HTTP/1.1 200 OK" -- enough to tell our own 200 from
+    // a refusal or from whatever else might be squatting on the port.
+    let mut head = [0u8; 15];
+    if stream.read_exact(&mut head).is_err() {
+        return false;
+    }
+    head.starts_with(b"HTTP/1.1 200")
+}
+
+/// Encode `text` as QR modules and flatten them into SVG path data.
+///
+/// Runs of dark modules are merged along each row, so the path carries one
+/// subpath per run instead of one per module — a version-3 code drops from
+/// ~450 rectangles to a few dozen, which matters because this string crosses
+/// the IPC boundary every time the pairing panel re-renders.
+pub fn qr_image(text: &str) -> Result<QrImage, String> {
+    let code = qrcode::QrCode::new(text.as_bytes())
+        .map_err(|error| format!("could not encode QR: {error}"))?;
+    let width = code.width();
+    let modules = code.to_colors();
+
+    let mut path = String::new();
+    for y in 0..width {
+        let mut x = 0;
+        while x < width {
+            if modules[y * width + x] != qrcode::Color::Dark {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < width && modules[y * width + x] == qrcode::Color::Dark {
+                x += 1;
+            }
+            let run = x - start;
+            path.push_str(&format!(
+                "M{} {}h{run}v1h-{run}z",
+                start as u32 + QUIET_ZONE,
+                y as u32 + QUIET_ZONE
+            ));
+        }
+    }
+
+    Ok(QrImage {
+        size: width as u32 + QUIET_ZONE * 2,
+        path,
+    })
+}
+
 fn serve(server: Arc<tiny_http::Server>, shared: Arc<Shared>) {
     for mut request in server.incoming_requests() {
         let path = request.url().split('?').next().unwrap_or("").to_string();
@@ -275,7 +446,13 @@ fn serve(server: Arc<tiny_http::Server>, shared: Arc<Shared>) {
             // A browser is the only pairing client that exists until the Kotlin
             // app does, so GET serves a form and POST does the work. The Android
             // app will POST the same shape and ignore the HTML entirely.
-            (tiny_http::Method::Get, "/pair") => html_response(200, &pair_form_page(None)),
+            (tiny_http::Method::Get, "/pair") => {
+                // `?code=` is what the pairing QR carries, so a scan lands on a
+                // form with the code already in it and the phone's owner only
+                // has to name the device.
+                let prefill = query_param(request.url(), "code");
+                html_response(200, &pair_form_page(None, prefill.as_deref()))
+            }
             (tiny_http::Method::Post, "/pair") => handle_pair(&mut request, &shared),
             (tiny_http::Method::Get, "/me") => handle_me(&request, &shared),
             _ => json_response(404, "{\"error\":\"not found\"}"),
@@ -322,7 +499,10 @@ fn handle_pair(
 
     if outcome != CodeCheck::Accepted {
         return if wants_html {
-            html_response(401, &pair_form_page(Some("That code was not accepted.")))
+            html_response(
+                401,
+                &pair_form_page(Some("That code was not accepted."), None),
+            )
         } else {
             json_response(401, "{\"error\":\"pairing refused\"}")
         };
@@ -407,6 +587,15 @@ fn parse_form(body: &str) -> std::collections::HashMap<String, String> {
         .collect()
 }
 
+/// Pull one parameter out of a request target's query string.
+///
+/// A query string is `application/x-www-form-urlencoded` in a different
+/// position, so `parse_form` already knows how to read it.
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let (_, query) = url.split_once('?')?;
+    parse_form(query).remove(key)
+}
+
 fn percent_decode(raw: &str) -> String {
     let bytes = raw.replace('+', " ");
     let bytes = bytes.as_bytes();
@@ -469,20 +658,39 @@ code{display:block;word-break:break-all;background:#27272a;border:1px solid #3f3
 border-radius:10px;padding:12px;font-size:12px;margin:0 0 18px}\
 .err{color:#fca5a5;font-size:14px;margin:0 0 14px}";
 
-fn pair_form_page(error: Option<&str>) -> String {
+fn pair_form_page(error: Option<&str>, prefill: Option<&str>) -> String {
     let error_html = error
         .map(|message| format!("<p class=\"err\">{}</p>", escape_html(message)))
         .unwrap_or_default();
+
+    // The code arrives from a query string, which anyone can write by hand, so
+    // it is clamped to the field's own maxlength and escaped before it goes
+    // anywhere near an attribute.
+    let (code_value, lead) = match prefill {
+        Some(code) => {
+            let clamped: String = code.chars().take(8).collect();
+            (
+                format!(" value=\"{}\"", escape_html(&clamped)),
+                "The code is filled in already. Give this phone a name and tap Pair.",
+            )
+        }
+        None => (
+            String::new(),
+            "Open Settings &rarr; Phone on your computer and start pairing. \
+Type the code it shows.",
+        ),
+    };
+
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
 <title>Pair with Linodea</title><style>{PAGE_STYLE}</style></head><body><main>\
 <h1>Pair with Linodea</h1>\
-<p>Open Settings &rarr; Phone link on your computer and start pairing. Type the code it shows.</p>\
+<p>{lead}</p>\
 {error_html}\
 <form method=\"post\" action=\"/pair\">\
 <label for=\"code\">Pairing code</label>\
-<input id=\"code\" name=\"code\" autocapitalize=\"characters\" autocomplete=\"off\" \
+<input id=\"code\" name=\"code\"{code_value} autocapitalize=\"characters\" autocomplete=\"off\" \
 autocorrect=\"off\" spellcheck=\"false\" inputmode=\"text\" maxlength=\"8\" required>\
 <label for=\"device\">Device name</label>\
 <input id=\"device\" name=\"device\" value=\"My phone\" maxlength=\"64\">\
@@ -498,7 +706,7 @@ fn paired_page(name: &str, token: &str) -> String {
 <title>Paired</title><style>{PAGE_STYLE}</style></head><body><main>\
 <h1>Paired</h1>\
 <p><strong>{}</strong> is now paired with this computer. It will show up in Settings \
-&rarr; Phone link, where you can remove it at any time.</p>\
+&rarr; Phone, where you can remove it at any time.</p>\
 <p>The Linodea app would keep this key for you. It is shown here only because a browser \
 has nowhere to store it &mdash; you do not need to write it down.</p>\
 <code>{}</code>\
@@ -909,5 +1117,269 @@ Connection: close\r\n\r\n"
         assert_eq!(second.port, first.port);
 
         assert!(!service.stop().running);
+    }
+
+    // --- QR encoding ------------------------------------------------------
+
+    #[test]
+    fn a_qr_reserves_a_quiet_zone_on_every_side() {
+        let qr = qr_image("http://192.168.1.155:7643/pair?code=ABC234").expect("encodes");
+
+        // Every coordinate in the path must sit inside the quiet zone's margin.
+        // This is the invariant scanners actually depend on, and it is the one a
+        // careless offset would silently break -- the code would still render
+        // and still look like a QR, it would just stop scanning reliably.
+        let inner_max = qr.size - QUIET_ZONE;
+        let mut moves = 0;
+        for step in qr.path.split('M').skip(1) {
+            moves += 1;
+            let (x, rest) = step.split_once(' ').expect("M takes two coordinates");
+            let y: u32 = rest
+                .split('h')
+                .next()
+                .expect("y before the run")
+                .parse()
+                .expect("y is a number");
+            let x: u32 = x.parse().expect("x is a number");
+            assert!(x >= QUIET_ZONE && x < inner_max, "x {x} outside quiet zone");
+            assert!(y >= QUIET_ZONE && y < inner_max, "y {y} outside quiet zone");
+        }
+        assert!(moves > 0, "a QR with no dark modules is not a QR");
+    }
+
+    #[test]
+    fn a_qr_merges_horizontal_runs_rather_than_drawing_every_module() {
+        let qr = qr_image("http://192.168.1.155:7643/pair?code=ABC234").expect("encodes");
+
+        let runs: Vec<u32> = qr
+            .path
+            .split('M')
+            .skip(1)
+            .map(|step| {
+                step.split_once('h')
+                    .expect("every subpath carries a run length")
+                    .1
+                    .split('v')
+                    .next()
+                    .expect("run length before the close")
+                    .parse()
+                    .expect("run length is a number")
+            })
+            .collect();
+
+        let dark: u32 = runs.iter().sum();
+        // Guards the IPC payload: this string is re-sent on every re-render of
+        // the pairing panel, and one subpath per dark module would roughly
+        // double it for no visual difference.
+        assert!(
+            (runs.len() as u32) < dark,
+            "{} subpaths for {dark} dark modules -- runs are not merging",
+            runs.len()
+        );
+        // The finder patterns are 7 modules wide, so a correctly merged path
+        // must contain at least one run that long.
+        assert!(
+            runs.iter().any(|&run| run >= 7),
+            "no run reached the width of a finder pattern: {runs:?}"
+        );
+    }
+
+    #[test]
+    fn a_longer_url_still_encodes_and_grows_the_code() {
+        let short = qr_image("http://10.0.0.2:7643/pair?code=ABC234").expect("encodes");
+        let long = qr_image("http://192.168.100.155:7643/pair?code=ABC234").expect("encodes");
+        assert!(long.size >= short.size);
+    }
+
+    #[test]
+    fn text_past_the_qr_capacity_is_refused_rather_than_panicking() {
+        // A QR tops out around 2953 bytes at the lowest error correction; this
+        // is well past any version of it.
+        let far_too_long = "x".repeat(8_000);
+        assert!(qr_image(&far_too_long).is_err());
+    }
+
+    // --- query parameters -------------------------------------------------
+
+    #[test]
+    fn a_pairing_code_is_read_out_of_the_query_string() {
+        assert_eq!(
+            query_param("/pair?code=ABC234", "code").as_deref(),
+            Some("ABC234")
+        );
+        assert_eq!(
+            query_param("/pair?other=1&code=XY7Z89", "code").as_deref(),
+            Some("XY7Z89")
+        );
+        assert_eq!(query_param("/pair", "code"), None);
+        assert_eq!(query_param("/pair?code=", "code").as_deref(), Some(""));
+        // Same decoding as a form body, since it is the same encoding.
+        assert_eq!(
+            query_param("/pair?code=A%20B", "code").as_deref(),
+            Some("A B")
+        );
+    }
+
+    #[test]
+    fn a_scanned_link_arrives_with_the_code_already_in_the_form() {
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+        let code = service.begin_pairing().code.expect("code is offered");
+
+        let response = fetch(status.port, &format!("/pair?code={code}"));
+        assert!(response.starts_with("HTTP/1.1 200"), "got: {response}");
+        assert!(
+            response.contains(&format!("value=\"{code}\"")),
+            "code should be prefilled, got: {response}"
+        );
+
+        // And without the parameter the field stays empty rather than carrying
+        // a stale value.
+        let bare = fetch(status.port, "/pair");
+        assert!(!bare.contains("value=\"\""), "got: {bare}");
+        assert!(bare.contains("name=\"code\" autocapitalize"), "got: {bare}");
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_prefilled_code_cannot_inject_markup_or_overflow_the_field() {
+        // The query string is writable by anyone who can reach the port, so the
+        // prefill is the one place untrusted text meets an HTML attribute.
+        let hostile = pair_form_page(None, Some("\"><script>alert(1)</script>"));
+        assert!(!hostile.contains("<script>"), "got: {hostile}");
+        // Clamped first, then escaped -- escaping first and cutting afterwards
+        // could slice an entity in half and produce the markup it was meant to
+        // prevent.
+        assert!(
+            hostile.contains("value=\"&quot;&gt;&lt;scrip\""),
+            "got: {hostile}"
+        );
+
+        // Clamped to the field's own maxlength so a megabyte of query string
+        // cannot become a megabyte of page.
+        let long = pair_form_page(None, Some(&"A".repeat(500)));
+        assert!(long.contains("value=\"AAAAAAAA\""), "got: {long}");
+        assert!(!long.contains("AAAAAAAAA"), "should clamp to 8 characters");
+    }
+
+    // --- reachability probe -----------------------------------------------
+
+    #[test]
+    fn a_running_server_answers_its_own_probe() {
+        let (service, path) = temp_service();
+        let status = service.start_on("0.0.0-test".into(), &[0]).expect("bind");
+
+        assert!(probe_one("127.0.0.1", status.port, PROBE_TIMEOUT));
+
+        service.stop();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_port_with_nothing_behind_it_fails_the_probe() {
+        // Bind and drop: the port is real and almost certainly still free, so
+        // the connect is refused rather than left hanging.
+        let port = {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+            listener.local_addr().expect("addr").port()
+        };
+        assert!(!probe_one("127.0.0.1", port, Duration::from_millis(250)));
+    }
+
+    #[test]
+    fn something_else_squatting_on_the_port_does_not_pass_as_our_server() {
+        // This is the reason the probe sends a real request instead of just
+        // connecting: a bare connect would call this address healthy.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let squatter = std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                drop(stream);
+            }
+        });
+
+        assert!(!probe_one("127.0.0.1", port, Duration::from_millis(500)));
+        let _ = squatter.join();
+    }
+
+    #[test]
+    fn a_stopped_server_reports_every_address_as_unreachable() {
+        let (service, path) = temp_service();
+
+        // No socket is bound, so nothing can answer -- and the probe must say so
+        // instantly rather than spending a timeout per address proving it.
+        let started = std::time::Instant::now();
+        let probes = service.probe_addresses();
+        assert!(
+            started.elapsed() < PROBE_TIMEOUT,
+            "a stopped server should not be probed over the network"
+        );
+        assert!(probes.iter().all(|probe| !probe.reachable));
+        assert_eq!(probes.len(), local_addresses().len());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_unparseable_address_is_dead_rather_than_a_panic() {
+        assert!(!probe_one("not-an-ip", 7643, Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn the_path_redraws_into_a_real_qr_code() {
+        // Paint the path back onto a grid and look for the three finder
+        // patterns -- the 7x7 bullseyes a camera uses to locate and orient a
+        // code. Nothing else here proves the flattening is correct: an off-by-one
+        // in the run merging, a swapped x and y, or a wrong quiet-zone offset all
+        // still produce a plausible-looking field of squares, and the only symptom
+        // would be a code that quietly refuses to scan.
+        let qr = qr_image("http://192.168.1.155:7643/pair?code=ABC234").expect("encodes");
+        let size = qr.size as usize;
+        let mut grid = vec![vec![false; size]; size];
+
+        for step in qr.path.split('M').skip(1) {
+            let (x, rest) = step.split_once(' ').expect("M takes two coordinates");
+            let (y, rest) = rest.split_once('h').expect("a run follows the move");
+            let (run, back) = rest.split_once("v1h-").expect("the run closes on itself");
+            let x: usize = x.parse().expect("x is a number");
+            let y: usize = y.parse().expect("y is a number");
+            let run: usize = run.parse().expect("run is a number");
+            assert_eq!(
+                back.trim_end_matches('z'),
+                run.to_string(),
+                "a subpath must return exactly as far as it advanced"
+            );
+            for column in grid[y].iter_mut().skip(x).take(run) {
+                *column = true;
+            }
+        }
+
+        const FINDER: [&str; 7] = [
+            "#######", "#     #", "# ### #", "# ### #", "# ### #", "#     #", "#######",
+        ];
+        let quiet = QUIET_ZONE as usize;
+        let modules = size - quiet * 2;
+        let corners = [(0, 0), (0, modules - 7), (modules - 7, 0)];
+        for (top, left) in corners {
+            for (row, expected) in FINDER.iter().enumerate() {
+                for (column, mark) in expected.chars().enumerate() {
+                    assert_eq!(
+                        grid[quiet + top + row][quiet + left + column],
+                        mark == '#',
+                        "finder pattern at ({top}, {left}) is wrong at ({row}, {column})"
+                    );
+                }
+            }
+        }
+
+        // And the margin really is a margin.
+        for (y, row) in grid.iter().enumerate() {
+            for (x, dark) in row.iter().enumerate() {
+                let in_margin = y < quiet || y >= size - quiet || x < quiet || x >= size - quiet;
+                assert!(!(in_margin && *dark), "a module landed in the quiet zone");
+            }
+        }
     }
 }

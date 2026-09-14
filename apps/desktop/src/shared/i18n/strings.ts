@@ -128,6 +128,15 @@ export interface Strings {
     pairStart: string;
     pairCancel: string;
     pairInstructions: (url: string) => string;
+    pairScanHint: string;
+    pairTypeFallback: (url: string) => string;
+    qrLabel: string;
+    checkAgain: string;
+    checking: string;
+    addressAnswers: string;
+    addressNoAnswer: string;
+    addressPick: string;
+    probeNote: string;
     lastSeen: (when: string) => string;
     neverSeen: string;
     forget: string;
@@ -413,6 +422,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       pairStart: "Start pairing",
       pairCancel: "Cancel",
       pairInstructions: (url) => `On your phone, open ${url} and type this code:`,
+      pairScanHint:
+        "Point your phone's camera at this, on the same Wi-Fi as this computer. The code is already in the link, so all you have to do is name the phone.",
+      pairTypeFallback: (url) =>
+        `No camera, or nothing happened? Open ${url} on your phone and type this code:`,
+      qrLabel: "Pairing code as a QR code",
+      checkAgain: "Check again",
+      checking: "Checking...",
+      addressAnswers: "Answers",
+      addressNoAnswer: "No answer",
+      addressPick: "Scan went nowhere? Point the code at a different address:",
+      probeNote:
+        "\"No answer\" means this computer could not reach that address itself, so your phone certainly cannot -- it is usually an unplugged cable or a virtual adapter. \"Answers\" is not a promise: a network that hides devices from each other, or a firewall set to Private only, still blocks the phone and cannot be seen from here.",
       lastSeen: (when) => `Last seen ${when}`,
       neverSeen: "Not seen yet",
       forget: "Remove",
@@ -705,6 +726,18 @@ const STRINGS: Record<LanguageId, Strings> = {
       pairStart: "Mulai sandingkan",
       pairCancel: "Batal",
       pairInstructions: (url) => `Di HP-mu, buka ${url} lalu ketik kode ini:`,
+      pairScanHint:
+        "Arahkan kamera HP ke gambar ini, dengan Wi-Fi yang sama seperti komputer ini. Kodenya sudah ada di dalam tautan, jadi kamu tinggal memberi nama HP-nya.",
+      pairTypeFallback: (url) =>
+        `Tidak ada kamera, atau tidak terjadi apa-apa? Buka ${url} di HP-mu lalu ketik kode ini:`,
+      qrLabel: "Kode penyandingan dalam bentuk QR",
+      checkAgain: "Cek lagi",
+      checking: "Mengecek...",
+      addressAnswers: "Menjawab",
+      addressNoAnswer: "Tidak menjawab",
+      addressPick: "Hasil scan tidak ke mana-mana? Arahkan kodenya ke alamat lain:",
+      probeNote:
+        "\"Tidak menjawab\" berarti komputer ini sendiri tidak bisa menjangkau alamat itu, jadi HP-mu pasti juga tidak -- biasanya kabel yang tercabut atau adapter virtual. \"Menjawab\" bukan jaminan: jaringan yang menyembunyikan perangkat satu sama lain, atau firewall yang hanya diizinkan untuk Private, tetap memblokir HP dan itu tidak bisa dilihat dari sini.",
       lastSeen: (when) => `Terakhir terlihat ${when}`,
       neverSeen: "Belum terlihat",
       forget: "Hapus",

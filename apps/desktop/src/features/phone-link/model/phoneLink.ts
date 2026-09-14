@@ -103,9 +103,18 @@ export async function forgetDevice(id: string): Promise<PairingState> {
   return invoke<PairingState>("forget_paired_device", { id });
 }
 
-/** The page a phone opens to type the code in. */
-export function pairUrl(address: string, port: number): string {
-  return `http://${address}:${port}/pair`;
+/**
+ * The page a phone opens to pair.
+ *
+ * With a `code`, the page arrives with it already filled in — this is what the
+ * QR encodes, so a scan leaves nothing to type but a device name. The code does
+ * end up in the phone's address bar and history, which is acceptable: it is
+ * single-use, it expires in five minutes, and it is already displayed openly on
+ * a screen in the same room.
+ */
+export function pairUrl(address: string, port: number, code?: string): string {
+  const base = `http://${address}:${port}/pair`;
+  return code ? `${base}?code=${encodeURIComponent(code)}` : base;
 }
 
 /**
@@ -116,4 +125,54 @@ export function pairUrl(address: string, port: number): string {
  */
 export function healthUrl(address: string, port: number): string {
   return `http://${address}:${port}/health`;
+}
+
+/** Mirrors `AddressProbe` in `lan.rs`. */
+export interface AddressProbe {
+  address: string;
+  /**
+   * Whether **this computer** reached the address, which is not the same as
+   * whether a phone can. The probe cannot see client isolation or a firewall
+   * that allows Private but not Public networks. So `false` is conclusive —
+   * that address is dead and a QR pointing at it would just hang — while
+   * `true` only means it is worth trying.
+   */
+  reachable: boolean;
+}
+
+/** Mirrors `QrImage` in `lan.rs`. */
+export interface QrImage {
+  /** Side length in modules, quiet zone included — the SVG viewBox. */
+  size: number;
+  /** `d` attribute for one `<path>`. */
+  path: string;
+}
+
+export async function probeAddresses(): Promise<AddressProbe[]> {
+  if (!isTauriRuntime()) return [];
+  return invoke<AddressProbe[]>("probe_lan_addresses");
+}
+
+export async function encodeQr(text: string): Promise<QrImage> {
+  if (!isTauriRuntime()) return { size: 0, path: "" };
+  return invoke<QrImage>("encode_qr", { text });
+}
+
+/**
+ * Which address the QR should point at.
+ *
+ * Prefers one that answered, because a QR encodes exactly one address and a
+ * scan that lands on a dead one gives the person nothing to fall back to — the
+ * hand-typed list at least let them try the next line. Falls back to the first
+ * listed address before any probe has run, which is the old behaviour and no
+ * worse than it.
+ */
+export function preferredAddress(
+  addresses: string[],
+  probes: AddressProbe[],
+): string | undefined {
+  const answered = addresses.find((address) =>
+    probes.some((probe) => probe.address === address && probe.reachable),
+  );
+  return answered ?? addresses[0];
 }

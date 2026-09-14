@@ -6,6 +6,12 @@
  * — plenty of campus and cafe networks block it — so the panel hands over a URL
  * to try from the phone's browser and lets the answer be observed rather than
  * assumed.
+ *
+ * Pairing leads with a QR because the alternative was reading an IP address off
+ * one screen and typing it into another, which went wrong the first time a real
+ * person tried it (`.255` for `.155`). The typed code stays underneath as the
+ * fallback: a QR is useless on a phone whose camera app will not open a plain
+ * `http://` link, and that is not knowable in advance.
  */
 
 import type { Strings } from "@/shared/i18n";
@@ -13,9 +19,12 @@ import type { Strings } from "@/shared/i18n";
 import {
   healthUrl,
   pairUrl,
+  type AddressProbe,
   type PairingState,
   type PhoneLinkStatus,
+  type QrImage,
 } from "../model/phoneLink";
+import { QrCode } from "./QrCode";
 
 export function PhoneLinkSection({
   busy,
@@ -23,9 +32,15 @@ export function PhoneLinkSection({
   error,
   onBeginPairing,
   onCancelPairing,
+  onCheckAddresses,
   onEnabledChange,
   onForgetDevice,
+  onSelectAddress,
   pairing,
+  probes,
+  probing,
+  qr,
+  selectedAddress,
   status,
   strings,
 }: {
@@ -34,16 +49,24 @@ export function PhoneLinkSection({
   error: string | null;
   onBeginPairing: () => void;
   onCancelPairing: () => void;
+  onCheckAddresses: () => void;
   onEnabledChange: (next: boolean) => void;
   onForgetDevice: (id: string) => void;
+  onSelectAddress: (address: string) => void;
   pairing: PairingState;
+  probes: AddressProbe[];
+  probing: boolean;
+  qr: QrImage | null;
+  selectedAddress: string | undefined;
   status: PhoneLinkStatus;
   strings: Strings;
 }) {
   const copy = strings.phoneLink;
-  // The first address is the best guess at a reachable one (virtual adapters
-  // sort last), so it's the one worth putting in front of the user.
-  const primaryAddress = status.addresses[0];
+  // `undefined` means "not checked yet", which is a third state and must not
+  // render as a failure — the panel would otherwise accuse a working address of
+  // being dead for the second before the first probe returns.
+  const verdict = (address: string): boolean | undefined =>
+    probes.find((probe) => probe.address === address)?.reachable;
 
   return (
     <div className="grid gap-3">
@@ -81,9 +104,21 @@ export function PhoneLinkSection({
 
       {enabled && status.running ? (
         <div className="rounded-xl border border-[var(--lin-border)] bg-[var(--lin-bg-hover)] px-3 py-2.5">
-          <p className="text-xs font-medium text-[var(--lin-text)]">
-            {copy.testHeading}
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-medium text-[var(--lin-text)]">
+              {copy.testHeading}
+            </p>
+            <button
+              className={`flex-none rounded-md border border-[var(--lin-border)] px-2 py-1 text-[11px] font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg)] ${
+                probing ? "cursor-wait opacity-60" : ""
+              }`}
+              disabled={probing}
+              onClick={onCheckAddresses}
+              type="button"
+            >
+              {probing ? copy.checking : copy.checkAgain}
+            </button>
+          </div>
           <p className="mt-0.5 text-xs leading-4 text-[var(--lin-text-mute)]">
             {copy.testHint}
           </p>
@@ -93,16 +128,37 @@ export function PhoneLinkSection({
             </p>
           ) : (
             <ul className="mt-2 grid gap-1">
-              {status.addresses.map((address) => (
-                <li
-                  className="select-all rounded-md bg-[var(--lin-bg)] px-2 py-1.5 font-mono text-xs text-[var(--lin-text)]"
-                  key={address}
-                >
-                  {healthUrl(address, status.port)}
-                </li>
-              ))}
+              {status.addresses.map((address) => {
+                const reachable = verdict(address);
+                return (
+                  <li
+                    className="flex items-center justify-between gap-2 rounded-md bg-[var(--lin-bg)] px-2 py-1.5"
+                    key={address}
+                  >
+                    <span className="select-all truncate font-mono text-xs text-[var(--lin-text)]">
+                      {healthUrl(address, status.port)}
+                    </span>
+                    {reachable === undefined ? null : (
+                      <span
+                        className={`flex-none text-[11px] font-medium ${
+                          reachable
+                            ? "text-[var(--lin-accent)]"
+                            : "text-[var(--lin-danger)]"
+                        }`}
+                      >
+                        {reachable ? copy.addressAnswers : copy.addressNoAnswer}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
+          {probes.length > 0 ? (
+            <p className="mt-2 text-xs leading-4 text-[var(--lin-text-dim)]">
+              {copy.probeNote}
+            </p>
+          ) : null}
           <p className="mt-2 text-xs leading-4 text-[var(--lin-text-mute)]">
             {copy.firewallNote}
           </p>
@@ -117,11 +173,62 @@ export function PhoneLinkSection({
 
           {pairing.code ? (
             <>
-              <p className="mt-0.5 text-xs leading-4 text-[var(--lin-text-mute)]">
-                {primaryAddress
-                  ? copy.pairInstructions(pairUrl(primaryAddress, status.port))
-                  : copy.noAddresses}
-              </p>
+              {qr && selectedAddress ? (
+                <>
+                  <div className="mt-2 flex justify-center">
+                    <QrCode image={qr} label={copy.qrLabel} />
+                  </div>
+                  <p className="mt-2 text-xs leading-4 text-[var(--lin-text-mute)]">
+                    {copy.pairScanHint}
+                  </p>
+
+                  {/* Only worth offering when there is genuinely something to
+                      switch to. One address means no choice to make. */}
+                  {status.addresses.length > 1 ? (
+                    <>
+                      <p className="mt-2 text-[11px] leading-4 text-[var(--lin-text-dim)]">
+                        {copy.addressPick}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {status.addresses.map((address) => {
+                          const reachable = verdict(address);
+                          const active = address === selectedAddress;
+                          return (
+                            <button
+                              className={`rounded-md border px-2 py-1 font-mono text-[11px] transition ${
+                                active
+                                  ? "border-[var(--lin-accent)] text-[var(--lin-text)]"
+                                  : "border-[var(--lin-border)] text-[var(--lin-text-mute)] hover:bg-[var(--lin-bg)]"
+                              }`}
+                              key={address}
+                              onClick={() => onSelectAddress(address)}
+                              type="button"
+                            >
+                              {address}
+                              {reachable === false ? (
+                                <span className="ml-1 text-[var(--lin-danger)]">
+                                  &times;
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : null}
+
+                  <p className="mt-2 border-t border-[var(--lin-border)] pt-2 text-xs leading-4 text-[var(--lin-text-mute)]">
+                    {copy.pairTypeFallback(pairUrl(selectedAddress, status.port))}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-0.5 text-xs leading-4 text-[var(--lin-text-mute)]">
+                  {selectedAddress
+                    ? copy.pairInstructions(pairUrl(selectedAddress, status.port))
+                    : copy.noAddresses}
+                </p>
+              )}
+
               {/* Wide tracking because this is read off one screen and typed
                   into another — the gaps are what stop characters merging. */}
               <p className="mt-2 rounded-md bg-[var(--lin-bg)] px-3 py-3 text-center font-mono text-2xl font-semibold tracking-[0.3em] text-[var(--lin-text)]">

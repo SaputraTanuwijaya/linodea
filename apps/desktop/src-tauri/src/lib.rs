@@ -46,6 +46,24 @@ fn stop_lan_server(state: tauri::State<'_, AppState>) -> lan::LanStatus {
     state.lan.stop()
 }
 
+/// `async` on purpose: Tauri runs a sync command on the main thread, and this
+/// one waits up to `PROBE_TIMEOUT` per dead address. Sync, a machine with an
+/// unplugged Ethernet adapter would freeze its own UI while finding that out.
+#[tauri::command]
+async fn probe_lan_addresses(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<lan::AddressProbe>, String> {
+    Ok(state.lan.probe_addresses())
+}
+
+/// Encode any short string as QR path data. Kept general rather than named for
+/// pairing: it takes the finished URL the panel already builds, so there is no
+/// second place that knows how a pairing link is shaped.
+#[tauri::command]
+fn encode_qr(text: String) -> Result<lan::QrImage, String> {
+    lan::qr_image(&text)
+}
+
 #[tauri::command]
 fn get_pairing_state(state: tauri::State<'_, AppState>) -> lan::PairingState {
     state.lan.pairing_state()
@@ -480,6 +498,8 @@ pub fn run() {
             get_lan_status,
             start_lan_server,
             stop_lan_server,
+            probe_lan_addresses,
+            encode_qr,
             get_pairing_state,
             begin_pairing,
             cancel_pairing,

@@ -15,9 +15,15 @@ function PhoneLinkSettingsContent({ bundle }: { bundle: SettingsBundle }) {
       error={link.error}
       onBeginPairing={() => void link.beginPairing()}
       onCancelPairing={() => void link.cancelPairing()}
+      onCheckAddresses={() => void link.checkAddresses()}
       onEnabledChange={(next) => void link.setEnabled(next)}
       onForgetDevice={(id) => void link.forgetDevice(id)}
+      onSelectAddress={link.selectAddress}
       pairing={link.pairing}
+      probes={link.probes}
+      probing={link.probing}
+      qr={link.qr}
+      selectedAddress={link.selectedAddress}
       status={link.status}
       strings={bundle.strings}
     />
