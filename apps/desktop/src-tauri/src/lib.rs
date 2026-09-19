@@ -1,6 +1,7 @@
 mod ai;
 mod data;
 mod desktop;
+mod discovery;
 mod lan;
 mod pairing;
 mod schedule;

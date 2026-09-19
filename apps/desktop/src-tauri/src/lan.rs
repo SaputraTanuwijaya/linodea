@@ -41,6 +41,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::data::ReminderStore;
+use crate::discovery::Advertiser;
 use crate::pairing::{self, CodeCheck, PairedDevice};
 use crate::schedule;
 
@@ -129,6 +130,9 @@ struct Running {
     server: Option<Arc<tiny_http::Server>>,
     worker: Option<JoinHandle<()>>,
     port: u16,
+    /// Held only while the server is up, so a machine that never enables phone
+    /// link never announces itself. Dropping it sends the mDNS goodbye.
+    advertiser: Option<Advertiser>,
 }
 
 /// State the request handler needs. Separate from `Running` because the worker
@@ -302,6 +306,7 @@ impl LanService {
             });
         }
 
+        let app_version_for_mdns = app_version.clone();
         *self.shared.app_version.lock().expect("version poisoned") = app_version;
 
         let (listener, port) = bind_listener(candidates)?;
@@ -318,6 +323,12 @@ impl LanService {
             .name("linodea-lan".into())
             .spawn(move || serve(worker_server, worker_shared))
             .map_err(|error| format!("could not spawn server thread: {error}"))?;
+
+        // Best-effort, and deliberately after the socket is up: discovery is a
+        // convenience on top of a working server, never a precondition for one.
+        // A network that drops multicast, or a policy that blocks mDNS, must
+        // still leave a link that works from a typed address.
+        inner.advertiser = advertise(port, &app_version_for_mdns);
 
         inner.server = Some(server);
         inner.worker = Some(worker);
@@ -341,6 +352,9 @@ impl LanService {
         if let Some(worker) = inner.worker.take() {
             let _ = worker.join();
         }
+        // Drop order matters only for tidiness here, but the goodbye should go
+        // out once the socket is genuinely closed rather than before.
+        inner.advertiser = None;
         inner.port = 0;
 
         LanStatus {
@@ -348,6 +362,27 @@ impl LanService {
             port: 0,
             addresses: local_addresses(),
             protocol_version: PROTOCOL_VERSION,
+        }
+    }
+}
+
+/// Start advertising, or don't, without ever failing the server.
+///
+/// Silent under `cargo test`: the suite runs many servers in parallel, and a
+/// test run should not spray mDNS registrations across whatever network the
+/// developer's machine happens to be on. The shape of the advertisement is
+/// asserted directly in `discovery`'s own tests instead.
+fn advertise(port: u16, app_version: &str) -> Option<Advertiser> {
+    if cfg!(test) {
+        return None;
+    }
+    match Advertiser::start(port, app_version, PROTOCOL_VERSION) {
+        Ok(advertiser) => Some(advertiser),
+        Err(error) => {
+            // Worth saying out loud -- a phone that cannot find this machine
+            // has no symptom of its own, so the only clue lives here.
+            eprintln!("linodea: local-network discovery unavailable: {error}");
+            None
         }
     }
 }
