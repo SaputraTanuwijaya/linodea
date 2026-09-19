@@ -894,6 +894,7 @@ const PHONE_APP_SCRIPT: &str = r##"
 const KEY = "linodea.deviceToken";
 const out = document.getElementById("out");
 const bar = document.getElementById("bar");
+let timer = null;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -908,36 +909,30 @@ function when(ms) {
   return day + " · " + time;
 }
 
-async function load() {
-  const token = localStorage.getItem(KEY);
-  if (!token) {
-    out.innerHTML = '<p>This phone is not paired yet.</p><a class="btn" href="/pair">Pair this phone</a>';
-    return;
-  }
-  let res;
-  try {
-    res = await fetch("/schedule", { headers: { Authorization: "Bearer " + token } });
-  } catch (e) {
-    out.innerHTML = "<p>Could not reach the computer. Same Wi-Fi?</p>";
-    return;
-  }
-  if (res.status === 401) {
-    localStorage.removeItem(KEY);
-    out.innerHTML = '<p>This phone was removed on the computer.</p><a class="btn" href="/pair">Pair again</a>';
-    return;
-  }
-  if (!res.ok) {
-    out.innerHTML = "<p>The computer answered with an error (" + res.status + ").</p>";
-    return;
-  }
-  const data = await res.json();
-  const firing = data.reminders.filter((r) => r.fireAtMs !== null);
-  bar.textContent = firing.length
-    ? firing.length + " scheduled in the next " + data.horizonDays + " days"
+// Reads the same way the desktop's own prealert rows do: whole days and hours
+// where they divide, minutes otherwise.
+function lead(mins) {
+  if (mins % 1440 === 0) return (mins / 1440) + (mins === 1440 ? " day" : " days");
+  if (mins % 60 === 0) return (mins / 60) + (mins === 60 ? " hour" : " hours");
+  return mins + " min";
+}
+
+function warnings(alarms) {
+  // Only the prealerts; lead 0 is the reminder itself and already shown above.
+  const pre = alarms.filter((a) => a.leadMinutes > 0).map((a) => lead(a.leadMinutes));
+  if (!pre.length) return "";
+  return "<p class='tags'>warns " + esc(pre.join(", ")) + " before</p>";
+}
+
+function render(data) {
+  const armed = data.reminders.reduce((n, r) => n + r.alarms.length, 0);
+  const firing = data.reminders.filter((r) => r.fireAtMs !== null).length;
+  bar.textContent = firing
+    ? firing + " in the next " + data.horizonDays + " days · " + armed + " alarms"
     : "Nothing scheduled in the next " + data.horizonDays + " days";
 
   if (!data.reminders.length) {
-    out.innerHTML = "<p class='muted'>Nothing to show. Capture something on the computer and reload.</p>";
+    out.innerHTML = "<p class='muted'>Nothing to show. Capture something on the computer.</p>";
     return;
   }
   out.innerHTML = "<ul>" + data.reminders.map((r) => {
@@ -951,11 +946,58 @@ async function load() {
       ? "<p class='tags'>" + r.tags.map((t) => "#" + esc(t)).join(" ") + "</p>"
       : "";
     return "<li class='" + (r.chainId ? "chained" : "") + "'>"
-      + "<p class='t'>" + esc(r.title) + "</p>" + time + rep + tags + "</li>";
+      + "<p class='t'>" + esc(r.title) + "</p>" + time + rep
+      + warnings(r.alarms) + tags + "</li>";
   }).join("") + "</ul>";
 }
 
+async function load() {
+  const token = localStorage.getItem(KEY);
+  if (!token) {
+    stop();
+    out.innerHTML = '<p>This phone is not paired yet.</p><a class="btn" href="/pair">Pair this phone</a>';
+    bar.textContent = "Not paired";
+    return;
+  }
+  let res;
+  try {
+    res = await fetch("/schedule", { headers: { Authorization: "Bearer " + token } });
+  } catch (e) {
+    bar.textContent = "Could not reach the computer. Same Wi-Fi?";
+    return;
+  }
+  if (res.status === 401) {
+    stop();
+    localStorage.removeItem(KEY);
+    out.innerHTML = '<p>This phone was removed on the computer.</p><a class="btn" href="/pair">Pair again</a>';
+    bar.textContent = "Not paired";
+    return;
+  }
+  if (!res.ok) {
+    bar.textContent = "The computer answered with an error (" + res.status + ").";
+    return;
+  }
+  render(await res.json());
+}
+
+// Poll only while the page is actually being looked at. A reminder marked done
+// on the desktop should disappear without a manual reload, but a phone in a
+// pocket has no reason to keep asking -- and this page has no way to fire an
+// alarm, so there is nothing to be gained by running in the background.
+function start() {
+  stop();
+  timer = setInterval(load, 30000);
+}
+function stop() {
+  if (timer !== null) { clearInterval(timer); timer = null; }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { stop(); } else { load(); start(); }
+});
+
 load();
+start();
 "##;
 
 /// What a phone sees at the root of the link.
@@ -1830,6 +1872,10 @@ Connection: close\r\n\r\n"
         );
         // It fetches with the token instead.
         assert!(response.contains("Bearer"), "got: {response}");
+        // ...and keeps itself current, so a reminder completed on the desktop
+        // leaves the phone's list without a manual reload.
+        assert!(response.contains("visibilitychange"), "got: {response}");
+        assert!(response.contains("setInterval"), "got: {response}");
 
         service.stop();
         let _ = std::fs::remove_file(&path);

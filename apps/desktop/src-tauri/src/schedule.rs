@@ -57,6 +57,26 @@ pub const HORIZON_DAYS: i64 = 14;
 
 const MS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
+/// One alarm to arm, already resolved to a moment in time.
+///
+/// The desktop expands prealerts rather than sending offsets for the phone to
+/// subtract, for the same reason it refuses to expand recurrence there: the
+/// arithmetic has edge cases, and one implementation with tests beats two
+/// without. The sharp one is a prealert that has **already passed** — a
+/// reminder due in thirty minutes with a one-day prealert yields a time in the
+/// past, and Android fires a past alarm immediately. A phone doing its own
+/// subtraction would announce "one day before" for something due within the
+/// hour.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alarm {
+    pub at_ms: i64,
+    /// Minutes before the reminder is due; `0` is the reminder itself. Carried
+    /// so the phone can word the notification ("in 1 hour: …") without having
+    /// to work out which alarm this was.
+    pub lead_minutes: i64,
+}
+
 /// One reminder as the phone sees it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +95,12 @@ pub struct ScheduledReminder {
     /// be drawn without holes, which happens when a sibling is already done or
     /// falls outside the horizon.
     pub fire_at_ms: Option<i64>,
+    /// Every moment this reminder should wake the phone: its prealerts and then
+    /// the reminder itself, soonest first, with anything already past removed.
+    ///
+    /// **This is the authoritative list** — the phone arms exactly these and
+    /// does no arithmetic of its own. Empty whenever `fire_at_ms` is null.
+    pub alarms: Vec<Alarm>,
     /// The repeat rule, for the phone to *show*. It is never expanded, here or
     /// there; see the module docs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,9 +113,12 @@ pub struct Schedule {
     pub protocol: u32,
     pub generated_at_ms: i64,
     pub horizon_days: i64,
-    /// Minutes-before-due at which the desktop also alerts. Sent so the phone
-    /// raises the same set of alerts the desktop does — without it a phone
-    /// would silently drop every early warning and look like it was firing late.
+    /// The desktop's current prealert configuration, for the phone to *show*
+    /// ("warned 1 day and 1 hour before"). Informational only — each reminder's
+    /// `alarms` is what gets armed, and these offsets are already folded into
+    /// it. Because every pull rebuilds the whole schedule, changing this on the
+    /// desktop re-times every reminder the phone holds, including ones captured
+    /// long before the change.
     pub prealert_offsets_minutes: Vec<i64>,
     pub reminders: Vec<ScheduledReminder>,
 }
@@ -153,10 +182,49 @@ fn chain_of(reminder: &ReminderNode, by_id: &HashMap<&str, &ReminderNode>) -> Op
     Some(head.id.clone())
 }
 
+/// Resolve a reminder's prealerts and its due time into moments to arm.
+///
+/// Prealerts already in the past are dropped rather than clamped to now: the
+/// point of a one-day warning is the day of warning, and firing it late is not
+/// a smaller version of that, it is a confusing notification for something
+/// about to happen anyway. T-due is always included and is never dropped, since
+/// it is the reminder itself.
+fn alarms_for(fire_at_ms: Option<i64>, now_ms: i64, offsets: &[i64]) -> Vec<Alarm> {
+    let Some(due) = fire_at_ms else {
+        return Vec::new();
+    };
+
+    let mut alarms: Vec<Alarm> = offsets
+        .iter()
+        // Non-positive offsets are meaningless as *pre*alerts and would
+        // duplicate or postdate T-due. The setting comes from localStorage,
+        // which a cleared cache or a hand-edit can leave in any state.
+        .filter(|&&lead| lead > 0)
+        .filter_map(|&lead| {
+            let at = due.checked_sub(lead.checked_mul(60_000)?)?;
+            (at > now_ms).then_some(Alarm {
+                at_ms: at,
+                lead_minutes: lead,
+            })
+        })
+        .collect();
+
+    alarms.push(Alarm {
+        at_ms: due,
+        lead_minutes: 0,
+    });
+    alarms.sort_by_key(|alarm| alarm.at_ms);
+    // Two offsets can land on the same moment; arming both would ring twice.
+    alarms.dedup_by_key(|alarm| alarm.at_ms);
+    alarms
+}
+
 fn view(
     reminder: &ReminderNode,
     fire_at_ms: Option<i64>,
     by_id: &HashMap<&str, &ReminderNode>,
+    now_ms: i64,
+    offsets: &[i64],
 ) -> ScheduledReminder {
     ScheduledReminder {
         id: reminder.id.clone(),
@@ -167,6 +235,7 @@ fn view(
         previous_id: reminder.previous_id.clone(),
         next_id: reminder.next_id.clone(),
         fire_at_ms,
+        alarms: alarms_for(fire_at_ms, now_ms, offsets),
         recurrence: reminder.recurrence.clone(),
     }
 }
@@ -228,7 +297,13 @@ pub fn build(
             .unwrap_or(false);
 
         if firing_at.is_some() || in_sent_chain {
-            out.push(view(reminder, firing_at, &by_id));
+            out.push(view(
+                reminder,
+                firing_at,
+                &by_id,
+                now_ms,
+                &prealert_offsets_minutes,
+            ));
         }
     }
 
@@ -483,5 +558,143 @@ mod tests {
         assert_eq!(schedule.generated_at_ms, NOW);
         let json = serde_json::to_string(&schedule).expect("serializes");
         assert!(json.contains("\"reminders\":[]"), "got: {json}");
+    }
+
+    // --- prealerts resolved into alarms -----------------------------------
+
+    #[test]
+    fn prealerts_arrive_as_moments_not_as_arithmetic_for_the_phone() {
+        // 1440 and 60 minutes before a reminder two days out: both still ahead,
+        // so all three alarms travel, soonest first, T-due last.
+        let schedule = build_default(&[reminder("a", "Sidang skripsi", at(2.0))]);
+        let alarms = &schedule.reminders[0].alarms;
+
+        let leads: Vec<i64> = alarms.iter().map(|a| a.lead_minutes).collect();
+        assert_eq!(leads, vec![1440, 60, 0]);
+
+        let due = NOW + 2 * MS_PER_DAY;
+        assert_eq!(alarms[0].at_ms, due - 1440 * 60_000);
+        assert_eq!(alarms[1].at_ms, due - 60 * 60_000);
+        assert_eq!(alarms[2].at_ms, due);
+        assert!(
+            alarms.windows(2).all(|w| w[0].at_ms < w[1].at_ms),
+            "alarms must be soonest first"
+        );
+    }
+
+    #[test]
+    fn a_prealert_whose_moment_has_passed_is_dropped_not_fired_late() {
+        // The bug this exists to prevent: a reminder due in thirty minutes with
+        // a one-day prealert. Subtracting on the phone yields a time in the
+        // past, and Android fires a past alarm immediately -- announcing "one
+        // day before" for something due within the hour.
+        let soon = NOW + 30 * 60_000;
+        let schedule = build(
+            &[reminder("a", "Rapat mendadak", at(30.0 / (24.0 * 60.0)))],
+            NOW,
+            HORIZON_DAYS,
+            vec![1440, 60, 10],
+            1,
+        );
+        let alarms = &schedule.reminders[0].alarms;
+
+        let leads: Vec<i64> = alarms.iter().map(|a| a.lead_minutes).collect();
+        assert_eq!(leads, vec![10, 0], "only the 10-minute warning still fits");
+        assert!(
+            alarms.iter().all(|alarm| alarm.at_ms > NOW),
+            "no alarm may be in the past: {alarms:?}"
+        );
+        assert_eq!(alarms[1].at_ms, soon);
+    }
+
+    #[test]
+    fn the_reminder_itself_always_survives_even_with_no_prealerts_configured() {
+        let schedule = build(
+            &[reminder("a", "Minum air", at(1.0))],
+            NOW,
+            HORIZON_DAYS,
+            vec![],
+            1,
+        );
+        let alarms = &schedule.reminders[0].alarms;
+        assert_eq!(alarms.len(), 1);
+        assert_eq!(alarms[0].lead_minutes, 0);
+        assert_eq!(alarms[0].at_ms, NOW + MS_PER_DAY);
+    }
+
+    #[test]
+    fn changing_the_offsets_re_times_a_reminder_captured_long_ago() {
+        // The property that makes prealert changes reach the phone at all: the
+        // schedule is rebuilt from scratch on every pull, so a reminder created
+        // weeks ago is re-timed by a setting changed a minute ago. Nothing has
+        // to hunt down and patch already-scheduled items.
+        let old_capture = reminder("a", "Bimbingan", at(3.0));
+
+        let before = build(
+            std::slice::from_ref(&old_capture),
+            NOW,
+            HORIZON_DAYS,
+            vec![1440],
+            1,
+        );
+        let after = build(
+            std::slice::from_ref(&old_capture),
+            NOW,
+            HORIZON_DAYS,
+            vec![30],
+            1,
+        );
+
+        let leads = |s: &Schedule| -> Vec<i64> {
+            s.reminders[0]
+                .alarms
+                .iter()
+                .map(|a| a.lead_minutes)
+                .collect()
+        };
+        assert_eq!(leads(&before), vec![1440, 0]);
+        assert_eq!(leads(&after), vec![30, 0]);
+    }
+
+    #[test]
+    fn two_offsets_landing_on_one_moment_do_not_ring_twice() {
+        // A zero or duplicated offset would otherwise collide with T-due, and
+        // the phone would arm the same instant twice.
+        let schedule = build(
+            &[reminder("a", "Sekali saja", at(1.0))],
+            NOW,
+            HORIZON_DAYS,
+            vec![60, 60, 0, -30],
+            1,
+        );
+        let alarms = &schedule.reminders[0].alarms;
+        let leads: Vec<i64> = alarms.iter().map(|a| a.lead_minutes).collect();
+        assert_eq!(
+            leads,
+            vec![60, 0],
+            "duplicates and non-positive offsets drop"
+        );
+    }
+
+    #[test]
+    fn a_reminder_carried_only_for_its_chain_arms_nothing() {
+        // It has no fire time, so it must have no alarms -- otherwise a done
+        // step would ring on the phone the moment the chain was sent.
+        let mut prep = reminder("prep", "Siapkan bahan", at(-1.0));
+        prep.status = "done".to_string();
+        prep.next_id = Some("main".to_string());
+        let mut main = reminder("main", "Presentasi", at(2.0));
+        main.previous_id = Some("prep".to_string());
+
+        let schedule = build_default(&[prep, main]);
+        let prep_view = schedule.reminders.iter().find(|r| r.id == "prep").unwrap();
+        assert!(prep_view.alarms.is_empty());
+        assert!(!schedule
+            .reminders
+            .iter()
+            .find(|r| r.id == "main")
+            .unwrap()
+            .alarms
+            .is_empty());
     }
 }
