@@ -78,19 +78,6 @@ fn list_reminder_nodes(state: tauri::State<'_, AppState>) -> Result<Vec<Reminder
 }
 
 #[tauri::command]
-fn list_due_reminder_nodes(
-    state: tauri::State<'_, AppState>,
-    now: String,
-) -> Result<Vec<ReminderNode>, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.list_due_reminders(&now)
-}
-
-#[tauri::command]
 fn update_reminder_node_status(
     state: tauri::State<'_, AppState>,
     patch: ReminderStatusPatch,
@@ -212,31 +199,6 @@ fn clear_reminder_fire_record(
         .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
 
     store.clear_fire_record(&reminder_id)
-}
-
-#[tauri::command]
-fn get_local_database_path(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    Ok(store.database_path().to_string_lossy().into_owned())
-}
-
-#[tauri::command]
-fn get_local_schema_version(state: tauri::State<'_, AppState>) -> Result<i64, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.schema_version()
-}
-
-#[tauri::command]
-fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
-    desktop::show_main_window(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -386,7 +348,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             create_reminder_node,
             list_reminder_nodes,
-            list_due_reminder_nodes,
             update_reminder_node_status,
             update_reminder_node,
             move_reminder_node,
@@ -397,14 +358,11 @@ pub fn run() {
             get_reminder_fire_records,
             set_reminder_fire_record,
             clear_reminder_fire_record,
-            get_local_database_path,
-            get_local_schema_version,
             get_ai_assist_status,
             save_and_test_ai_api_key,
             delete_ai_api_key,
             list_ai_models,
             normalize_reminder_with_ai,
-            show_main_window,
             hide_main_window,
             enter_capture_mode,
             enter_list_mode,

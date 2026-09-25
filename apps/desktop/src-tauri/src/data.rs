@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -262,10 +262,6 @@ impl ReminderStore {
             .unwrap_or(0)
     }
 
-    pub fn database_path(&self) -> &Path {
-        &self.database_path
-    }
-
     pub fn create_reminder(&self, reminder: ReminderNode) -> Result<ReminderNode, String> {
         validate_reminder(&reminder)?;
 
@@ -368,59 +364,6 @@ impl ReminderStore {
 
         let rows = statement
             .query_map([], reminder_from_row)
-            .map_err(to_store_error)?;
-        let mut reminders = Vec::new();
-
-        for row in rows {
-            reminders.push(row.map_err(to_store_error)?);
-        }
-
-        Ok(reminders)
-    }
-
-    pub fn list_due_reminders(&self, now: &str) -> Result<Vec<ReminderNode>, String> {
-        if now.trim().is_empty() {
-            return Err("Due reminder query time is required.".to_string());
-        }
-
-        let mut statement = self
-            .connection
-            .prepare(
-                r#"
-                SELECT
-                  id,
-                  user_id,
-                  title,
-                  raw_input,
-                  description,
-                  scheduled_at,
-                  timezone,
-                  reminder_type,
-                  status,
-                  tags_json,
-                  parent_id,
-                  previous_id,
-                  next_id,
-                  checklist_json,
-                  recurrence_json,
-                  confidence,
-                  created_at,
-                  updated_at,
-                  completed_at,
-                  snoozed_until,
-                  created_on_device_id,
-                  sync_version
-                FROM reminder_nodes
-                WHERE
-                  (status = 'pending' AND scheduled_at <= ?1)
-                  OR (status = 'snoozed' AND snoozed_until IS NOT NULL AND snoozed_until <= ?1)
-                ORDER BY COALESCE(snoozed_until, scheduled_at) ASC, created_at ASC
-                "#,
-            )
-            .map_err(to_store_error)?;
-
-        let rows = statement
-            .query_map(params![now], reminder_from_row)
             .map_err(to_store_error)?;
         let mut reminders = Vec::new();
 
@@ -855,16 +798,6 @@ impl ReminderStore {
 
         tx.commit().map_err(to_store_error)?;
         Ok(())
-    }
-
-    pub fn schema_version(&self) -> Result<i64, String> {
-        self.connection
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(to_store_error)
     }
 
     fn migrate(&self) -> Result<(), String> {
@@ -1523,38 +1456,9 @@ mod tests {
     fn records_current_schema_version() {
         let store = ReminderStore::open_in_memory().expect("store opens");
 
-        let version = store.schema_version().expect("schema version exists");
+        let version = store.recorded_schema_version();
 
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
-    }
-
-    #[test]
-    fn lists_due_pending_and_due_snoozed_reminders() {
-        let store = ReminderStore::open_in_memory().expect("store opens");
-        store
-            .create_reminder(sample_reminder("due-pending"))
-            .expect("due pending reminder is created");
-
-        let mut future = sample_reminder("future-pending");
-        future.scheduled_at = "2026-05-22T13:30:00.000Z".to_string();
-        store
-            .create_reminder(future)
-            .expect("future pending reminder is created");
-
-        let mut snoozed = sample_reminder("due-snoozed");
-        snoozed.status = "snoozed".to_string();
-        snoozed.snoozed_until = Some("2026-05-22T12:10:00.000Z".to_string());
-        store
-            .create_reminder(snoozed)
-            .expect("due snoozed reminder is created");
-
-        let due = store
-            .list_due_reminders("2026-05-22T12:31:00.000Z")
-            .expect("due reminders are listed");
-
-        assert_eq!(due.len(), 2);
-        assert_eq!(due[0].id, "due-snoozed");
-        assert_eq!(due[1].id, "due-pending");
     }
 
     #[test]
@@ -1836,10 +1740,7 @@ mod tests {
         assert!(store
             .column_exists("reminder_nodes", "recurrence_json")
             .expect("checks column"));
-        assert_eq!(
-            store.schema_version().expect("version"),
-            CURRENT_SCHEMA_VERSION
-        );
+        assert_eq!(store.recorded_schema_version(), CURRENT_SCHEMA_VERSION);
         // v3 adds the fire-state table; a migrated v1 DB gets it too, and its
         // fire store starts empty.
         assert!(store
@@ -1920,7 +1821,7 @@ mod tests {
             database_path: PathBuf::from(":memory:"),
         };
         // Precondition: the marker lies.
-        assert_eq!(store.schema_version().expect("version"), 4);
+        assert_eq!(store.recorded_schema_version(), 4);
         assert!(!store.column_exists("reminder_nodes", "tags_json").unwrap());
         assert!(store.column_exists("reminder_nodes", "category").unwrap());
 

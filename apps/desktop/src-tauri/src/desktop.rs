@@ -94,10 +94,6 @@ pub fn show_ai_settings_mode(app: &AppHandle) -> tauri::Result<()> {
     show_in_mode(app, SETTINGS_SIZE, MODE_AI_SETTINGS)
 }
 
-pub fn show_main_window(app: &AppHandle) -> tauri::Result<()> {
-    show_capture_mode(app)
-}
-
 pub fn hide_main_window(app: &AppHandle) -> tauri::Result<()> {
     main_window(app)?.hide()
 }

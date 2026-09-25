@@ -15,7 +15,7 @@ pub fn setup_global_shortcut(app: &mut App) -> tauri::Result<()> {
                 if shortcut == &capture_shortcut_for_handler {
                     match event.state() {
                         ShortcutState::Pressed => {
-                            let _ = desktop::show_main_window(app);
+                            let _ = desktop::show_capture_mode(app);
                         }
                         ShortcutState::Released => {}
                     }
