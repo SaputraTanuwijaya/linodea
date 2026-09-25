@@ -5,8 +5,8 @@ Linodea is a local-first desktop reminder app for fast capture and preparation-a
 Status: working local-first desktop MVP. The repository currently includes the desktop shell,
 quick capture popup v1, shared types, a deterministic English + Indonesian parser
 with absolute calendar dates, typo tolerance (fuzzy date words, checklist cues,
-type cues, Indonesian time markers, and conjunctions) plus `#tag` extraction, and a local SQLite data layer with status and
-due-reminder queries. The capture surface is a frameless floating popup: pressing
+type cues, Indonesian time markers, and conjunctions) plus `#tag` extraction, and a local SQLite
+data layer. The capture surface is a frameless floating popup: pressing
 `Ctrl+Alt+Shift+Space` summons a small dark rounded textbox, typing a reminder
 shows the parsed time inline, and Enter saves and dismisses. The popup now uses a
 linked-node Linodea mark and rotates general example prompts when reopened;
@@ -18,9 +18,9 @@ retag it. Settings use a category
 navigator for theme, language, configurable prealerts, alert presence,
 launch-on-startup, optional AI Assist, updates, and a Support section with donation
 and feedback links. Linodea
-checks for a newer version shortly after it starts and
-always asks before downloading and restarting; the same check can be run by hand from
-Settings. `/ai` opens Gemini setup and `/feedback` opens the feedback form in the
+checks for a newer version shortly after it starts and downloads it quietly in the
+background; it only asks before restarting to apply it. The same check can be run by hand
+from Settings. `/ai` opens Gemini setup and `/feedback` opens the feedback form in the
 browser; normal reminders remain local and instant, while
 enabled AI Assist only receives failed or suspicious reminder phrases as a fallback.
 AI setup links directly to Google AI Studio, keeps connected credentials collapsed,
@@ -37,15 +37,15 @@ minute; add `/countdown` to keep exact-second timing for short countdowns.
 
 Linodea follows the **local-first software** model: the device is the source of truth, and the network is optional. Reminders are stored in a local SQLite database. Nothing leaves the device by default; users who explicitly enable BYO-key AI Assist send only the reminder phrase being resolved plus its time context to Gemini.
 
-The app uses a **native shell + web frontend** pattern via Tauri v2. A small Rust binary owns the OS surface — tray icon, global shortcut, notifications, autostart, the SQLite file — and a React/TypeScript UI renders inside a system WebView. The two halves talk through a typed command boundary.
+The app uses a **native shell + web frontend** pattern via Tauri v2. A small Rust binary owns the OS surface — tray icon, global shortcut, the alert and timer windows, autostart, the SQLite file — and a React/TypeScript UI renders inside a system WebView. The two halves talk through a typed command boundary.
 
 Why this stack:
 
 - **Offline-by-default** — no server to wait on, no account to create.
 - **Privacy by default** — reminder history stays local; the optional AI fallback is explicit and narrowly scoped.
 - **Fast cold start** — opening the popup is instant; no network round-trip.
-- **OS-native feel** — real global shortcut, real tray icon, real toast notifications.
-- **Small installer, one codebase** — Windows / macOS / Linux ship from the same source.
+- **OS-native feel** — real global shortcut, real tray icon, and an always-on-top alert window instead of an OS toast that Focus Assist can swallow.
+- **Small installer** — Windows is the only platform built and released today; Tauri keeps macOS and Linux possible from the same source.
 
 This pattern fits productivity tools where cloud sync is overkill, where reliability matters more than collaboration, and where the user owns their data. It is the wrong choice when an app needs real-time multi-user sync, cross-device hand-off, or rich server-side processing — none of which Linodea needs in the MVP.
 
@@ -65,9 +65,9 @@ Linodea means Linear + Nodes. A reminder can become a small chain of connected n
 [Prep] -> [Main Reminder] -> [Follow-up]
 ```
 
-The MVP should stay focused on quick capture, local reliability, and a simple way to see reminder chains.
+The MVP stays focused on quick capture, local reliability, and a simple way to see reminder chains.
 
-## Planned MVP Features
+## MVP Features
 
 - Global shortcut capture (`Ctrl+Alt+Shift+Space`).
 - Quick capture window.
@@ -75,9 +75,9 @@ The MVP should stay focused on quick capture, local reliability, and a simple wa
 - Raw input preservation.
 - Local SQLite storage.
 - Tray/background window behavior.
-- Local desktop notifications.
-- Simple reminder history.
-- Roadmap-style view for prep, main, and follow-up chains.
+- Prealerts and a due-time alert in Linodea's own alert window.
+- A reminder list with done / snooze / edit / delete.
+- A chain view for prep, main, and follow-up reminders.
 
 ## Non-Goals
 
@@ -93,15 +93,13 @@ own alarm fires it — with the PC switched off and the phone offline. Nothing r
 on your behalf at reminder time. The handoff happens over your own network by default;
 anything else will be opt-in, off by default, and unable to read what it carries.
 
-## Planned Stack
+## Stack
 
 - Tauri v2.
 - React + TypeScript.
 - Tailwind CSS.
 - SQLite local database.
 - Rust/Tauri only for native desktop integration.
-
-Later sync/backend work may use Go, PostgreSQL, and PASETO, but that is outside the MVP skeleton.
 
 ## License
 
