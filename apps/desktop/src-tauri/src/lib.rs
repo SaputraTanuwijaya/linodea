@@ -54,27 +54,26 @@ async fn normalize_reminder_with_ai(
     state.ai.normalize(request).await
 }
 
+impl AppState {
+    /// The reminder store, locked for the duration of one command.
+    fn store(&self) -> Result<std::sync::MutexGuard<'_, ReminderStore>, String> {
+        self.reminders
+            .lock()
+            .map_err(|_| "Reminder store lock was poisoned.".to_string())
+    }
+}
+
 #[tauri::command]
 fn create_reminder_node(
     state: tauri::State<'_, AppState>,
     reminder: ReminderNode,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.create_reminder(reminder)
+    state.store()?.create_reminder(reminder)
 }
 
 #[tauri::command]
 fn list_reminder_nodes(state: tauri::State<'_, AppState>) -> Result<Vec<ReminderNode>, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.list_reminders()
+    state.store()?.list_reminders()
 }
 
 #[tauri::command]
@@ -82,12 +81,7 @@ fn update_reminder_node_status(
     state: tauri::State<'_, AppState>,
     patch: ReminderStatusPatch,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.update_reminder_status(patch)
+    state.store()?.update_reminder_status(patch)
 }
 
 #[tauri::command]
@@ -95,12 +89,7 @@ fn update_reminder_node(
     state: tauri::State<'_, AppState>,
     patch: ReminderEditPatch,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.update_reminder(patch)
+    state.store()?.update_reminder(patch)
 }
 
 #[tauri::command]
@@ -108,22 +97,12 @@ fn move_reminder_node(
     state: tauri::State<'_, AppState>,
     patch: MovePatch,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.move_reminder(patch)
+    state.store()?.move_reminder(patch)
 }
 
 #[tauri::command]
 fn list_reminder_chains(state: tauri::State<'_, AppState>) -> Result<Vec<ChainNode>, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.list_reminder_chains()
+    state.store()?.list_reminder_chains()
 }
 
 #[tauri::command]
@@ -131,22 +110,12 @@ fn set_reminder_node_tags(
     state: tauri::State<'_, AppState>,
     patch: ReminderTagsPatch,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.set_reminder_tags(patch)
+    state.store()?.set_reminder_tags(patch)
 }
 
 #[tauri::command]
 fn delete_reminder_node(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.delete_reminder(&id)
+    state.store()?.delete_reminder(&id)
 }
 
 #[tauri::command]
@@ -154,24 +123,14 @@ fn advance_reminder_recurrence(
     state: tauri::State<'_, AppState>,
     patch: AdvanceRecurrencePatch,
 ) -> Result<ReminderNode, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.advance_reminder_recurrence(patch)
+    state.store()?.advance_reminder_recurrence(patch)
 }
 
 #[tauri::command]
 fn get_reminder_fire_records(
     state: tauri::State<'_, AppState>,
 ) -> Result<HashMap<String, FireRecord>, String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.get_fire_records()
+    state.store()?.get_fire_records()
 }
 
 #[tauri::command]
@@ -180,12 +139,7 @@ fn set_reminder_fire_record(
     reminder_id: String,
     record: FireRecord,
 ) -> Result<(), String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.set_fire_record(reminder_id, record)
+    state.store()?.set_fire_record(reminder_id, record)
 }
 
 #[tauri::command]
@@ -193,12 +147,7 @@ fn clear_reminder_fire_record(
     state: tauri::State<'_, AppState>,
     reminder_id: String,
 ) -> Result<(), String> {
-    let store = state
-        .reminders
-        .lock()
-        .map_err(|_| "Reminder store lock was poisoned.".to_string())?;
-
-    store.clear_fire_record(&reminder_id)
+    state.store()?.clear_fire_record(&reminder_id)
 }
 
 #[tauri::command]
