@@ -240,6 +240,19 @@ export function CapturePage({
     if (shouldHideAfterSave) isLeavingCapture.current = false;
   }, [shouldHideAfterSave]);
 
+  function clearInput() {
+    setInput("");
+    setCaret(0);
+  }
+
+  /** Drop any AI request in flight and its result, so a stale answer can't land. */
+  function cancelAi() {
+    aiRequestId.current += 1;
+    setAiPreview(null);
+    setAiMessage(null);
+    setIsAiResolving(false);
+  }
+
   function syncCaret(el: HTMLInputElement) {
     setCaret(el.selectionStart ?? el.value.length);
   }
@@ -249,10 +262,7 @@ export function CapturePage({
     setInput(next);
     syncCaret(event.currentTarget);
     if (anchorPicking) setAnchorIndex(0);
-    aiRequestId.current += 1;
-    setAiPreview(null);
-    setAiMessage(null);
-    setIsAiResolving(false);
+    cancelAi();
   }
 
   function handleSelect(event: SyntheticEvent<HTMLInputElement>) {
@@ -293,8 +303,7 @@ export function CapturePage({
   /** `/feedback` opens the external feedback form and clears the command text,
    *  staying in the capture bar (unlike the nav commands). */
   function openFeedback() {
-    setInput("");
-    setCaret(0);
+    clearInput();
     focusInput(inputRef.current);
     if (isTauriRuntime()) void openFeedbackForm();
   }
@@ -305,16 +314,14 @@ export function CapturePage({
   function leaveCaptureFor(enterCommand: string) {
     if (!isTauriRuntime()) return;
     isLeavingCapture.current = true;
-    setInput("");
-    setCaret(0);
+    clearInput();
     void invoke(enterCommand).catch(() => {
       isLeavingCapture.current = false;
     });
   }
 
   async function enterAnchorMode() {
-    setInput("");
-    setCaret(0);
+    clearInput();
     setAnchorIndex(0);
     setLinkAnchor(null);
     let list: ReminderNode[] = [];
@@ -330,24 +337,14 @@ export function CapturePage({
     focusInput(inputRef.current);
   }
 
-  function bindAnchor(anchor: ReminderNode) {
+  /** Leave the anchor picker with `anchor` bound — or with none, which exits
+   *  the link flow entirely (Esc / chip ✕) back to a normal capture. */
+  function endAnchorPick(anchor: ReminderNode | null) {
     setLinkAnchor(anchor);
     setAnchorPicking(false);
     setAnchors([]);
     setAnchorIndex(0);
-    setInput("");
-    setCaret(0);
-    focusInput(inputRef.current);
-  }
-
-  /** Exit the link flow entirely (Esc / chip ✕), back to a normal capture. */
-  function cancelLink() {
-    setLinkAnchor(null);
-    setAnchorPicking(false);
-    setAnchors([]);
-    setAnchorIndex(0);
-    setInput("");
-    setCaret(0);
+    clearInput();
     focusInput(inputRef.current);
   }
 
@@ -367,12 +364,12 @@ export function CapturePage({
       if (event.key === "Enter") {
         event.preventDefault();
         const anchor = filteredAnchors[clampedAnchorIndex];
-        if (anchor) bindAnchor(anchor);
+        if (anchor) endAnchorPick(anchor);
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        cancelLink();
+        endAnchorPick(null);
         return;
       }
       return; // let other keys type into the filter
@@ -407,16 +404,13 @@ export function CapturePage({
     if (event.key !== "Escape") return;
     event.preventDefault();
     if (isAiResolving || aiPreview || aiMessage) {
-      aiRequestId.current += 1;
-      setIsAiResolving(false);
-      setAiPreview(null);
-      setAiMessage(null);
+      cancelAi();
       focusInput(inputRef.current);
       return;
     }
     // Phase 3: Esc drops the link first; otherwise dismiss the window.
     if (linkAnchor) {
-      cancelLink();
+      endAnchorPick(null);
       return;
     }
     setInput("");
@@ -508,8 +502,7 @@ export function CapturePage({
           parentId: linkAnchor.id,
           updatedAt: new Date().toISOString(),
         });
-        setInput("");
-        setCaret(0);
+        clearInput();
         setLinkAnchor(null);
         onSaved();
         if (shouldHideAfterSave) await hideMainWindow();
@@ -532,8 +525,7 @@ export function CapturePage({
         }).catch(() => undefined);
       }
 
-      setInput("");
-      setCaret(0);
+      clearInput();
       setAiPreview(null);
       setAiMessage(null);
       // onSaved triggers the scheduler to fire anything immediately due and
@@ -573,7 +565,7 @@ export function CapturePage({
               <button
                 aria-label={strings.link.chipClear}
                 className="flex-none text-[var(--lin-text-mute)] transition hover:text-[var(--lin-text)]"
-                onClick={cancelLink}
+                onClick={() => endAnchorPick(null)}
                 tabIndex={-1}
                 type="button"
               >
@@ -652,7 +644,7 @@ export function CapturePage({
                   key={anchor.id}
                   onMouseDown={(event) => {
                     event.preventDefault();
-                    bindAnchor(anchor);
+                    endAnchorPick(anchor);
                   }}
                   role="option"
                   type="button"
