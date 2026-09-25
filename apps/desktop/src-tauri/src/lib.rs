@@ -352,7 +352,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let store = ReminderStore::open(&app.handle()).map_err(std::io::Error::other)?;
+            let store = ReminderStore::open(app.handle()).map_err(std::io::Error::other)?;
             app.manage(AppState {
                 reminders: Mutex::new(store),
                 ai: ai::AiService::new(),
