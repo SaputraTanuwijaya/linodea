@@ -33,14 +33,13 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { clearReminderFireRecord, updateReminderNodeStatus } from "@/entities/reminder";
 import { alertProfile, type AlertPresence } from "@/features/alerts";
 import { getStoredLanguage } from "@/features/language";
 import { stringsFor } from "@/shared/i18n";
-import { formatDateTime, playUiSound } from "@/shared/lib";
+import { formatDateTime, playUiSound, useTauriEvent } from "@/shared/lib";
 
 const NOTIFY_EVENT = "linodea:notify";
 const SNOOZE_MS = 10 * 60_000;
@@ -74,20 +73,9 @@ export function AlertPage() {
     pingTimersRef.current = [];
   }
 
-  useEffect(() => {
-    let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-    void listen<AlertPayload>(NOTIFY_EVENT, (event) => {
-      setQueue((q) => [...q, event.payload].slice(-MAX_QUEUE));
-    }).then((fn) => {
-      if (mounted) unlisten = fn;
-      else fn();
-    });
-    return () => {
-      mounted = false;
-      unlisten?.();
-    };
-  }, []);
+  useTauriEvent<AlertPayload>(NOTIFY_EVENT, (payload) => {
+    setQueue((q) => [...q, payload].slice(-MAX_QUEUE));
+  });
 
   // A new card at the head of the queue starts un-paused, even if a stale
   // pointer-enter never got its matching leave (the window can hide mid-hover).

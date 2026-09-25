@@ -19,11 +19,11 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 
 import { getStoredLanguage } from "@/features/language";
 import { stringsFor } from "@/shared/i18n";
+import { useTauriEvent } from "@/shared/lib";
 
 const TIMER_EVENT = "linodea:timer";
 
@@ -40,22 +40,11 @@ export function TimerPage() {
   const strings = useMemo(() => stringsFor(getStoredLanguage()), []);
 
   // Receive new countdowns. A fresh one replaces whatever is showing.
-  useEffect(() => {
-    let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-    void listen<TimerPayload>(TIMER_EVENT, (event) => {
-      setTimer(event.payload);
-      setNow(Date.now());
-      setStartedAt(Date.now());
-    }).then((fn) => {
-      if (mounted) unlisten = fn;
-      else fn();
-    });
-    return () => {
-      mounted = false;
-      unlisten?.();
-    };
-  }, []);
+  useTauriEvent<TimerPayload>(TIMER_EVENT, (payload) => {
+    setTimer(payload);
+    setNow(Date.now());
+    setStartedAt(Date.now());
+  });
 
   // Tick once a second while a timer is active.
   useEffect(() => {

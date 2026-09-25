@@ -20,12 +20,13 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 
 import { getStoredLanguage } from "@/features/language";
 import { CONFIRM_EVENT, CONFIRM_RESULT_EVENT } from "@/shared/config";
 import { stringsFor } from "@/shared/i18n";
+import { useTauriEvent } from "@/shared/lib";
 
 type ConfirmKind = "quit" | "autostart" | "autostartOff";
 
@@ -37,17 +38,12 @@ export function ConfirmPage() {
   const [kind, setKind] = useState<ConfirmKind | null>(null);
   const strings = useMemo(() => stringsFor(getStoredLanguage()), []);
 
+  useTauriEvent<ConfirmPayload>(CONFIRM_EVENT, (payload) => setKind(payload.kind));
+
+  // Startup race: if `show_confirm` fired before the listener above was ready
+  // (the first-run autostart prompt), drain the kind Rust stashed.
   useEffect(() => {
     let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-    void listen<ConfirmPayload>(CONFIRM_EVENT, (event) => {
-      if (mounted) setKind(event.payload.kind);
-    }).then((fn) => {
-      if (mounted) unlisten = fn;
-      else fn();
-    });
-    // Startup race: if `show_confirm` fired before this listener was ready (the
-    // first-run autostart prompt), drain the kind Rust stashed.
     void invoke<ConfirmKind | null>("take_pending_confirm")
       .then((pending) => {
         if (mounted && pending) setKind(pending);
@@ -55,7 +51,6 @@ export function ConfirmPage() {
       .catch(() => undefined);
     return () => {
       mounted = false;
-      unlisten?.();
     };
   }, []);
 

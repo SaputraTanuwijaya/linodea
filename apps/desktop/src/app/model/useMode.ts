@@ -11,11 +11,10 @@
  * sizing constant, then render the page in App.tsx.
  */
 
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { MODE_EVENT } from "@/shared/config";
-import { isTauriRuntime } from "@/shared/lib";
+import { useTauriEvent } from "@/shared/lib";
 
 export type Mode = "capture" | "list" | "chain" | "settings";
 
@@ -28,31 +27,12 @@ export function useMode() {
   // still counts as navigating.
   const [modeEpoch, setModeEpoch] = useState(0);
 
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-
-    let mounted = true;
-    let unlisten: UnlistenFn | undefined;
-
-    void listen<string>(MODE_EVENT, (event) => {
-      if (!mounted) return;
-      const parsed = parseMode(event.payload);
-      setMode(parsed.mode);
-      setSettingsFocus(parsed.settingsSection);
-      setModeEpoch((epoch) => epoch + 1);
-    }).then((fn) => {
-      if (mounted) {
-        unlisten = fn;
-      } else {
-        fn();
-      }
-    });
-
-    return () => {
-      mounted = false;
-      unlisten?.();
-    };
-  }, []);
+  useTauriEvent<string>(MODE_EVENT, (payload) => {
+    const parsed = parseMode(payload);
+    setMode(parsed.mode);
+    setSettingsFocus(parsed.settingsSection);
+    setModeEpoch((epoch) => epoch + 1);
+  });
 
   return { mode, settingsFocus, modeEpoch };
 }
