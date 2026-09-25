@@ -60,7 +60,6 @@ import {
   listReminderNodes,
   moveReminderNode,
 } from "@/entities/reminder";
-import { FEEDBACK_FORM_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import {
   formatDateTime,
@@ -139,9 +138,6 @@ export function CapturePage({
   const [anchors, setAnchors] = useState<ReminderNode[]>([]);
   const [anchorIndex, setAnchorIndex] = useState(0);
   const [linkAnchor, setLinkAnchor] = useState<ReminderNode | null>(null);
-
-  const internalRef = useRef<HTMLInputElement>(null);
-  const ref = inputRef ?? internalRef;
 
   const slash = useSlashCommands(input, caret, strings);
 
@@ -267,7 +263,7 @@ export function CapturePage({
     setInput(result.value);
     setCaret(result.caret);
     window.requestAnimationFrame(() => {
-      const el = ref.current;
+      const el = inputRef.current;
       if (!el) return;
       el.focus();
       el.setSelectionRange(result.caret, result.caret);
@@ -295,15 +291,12 @@ export function CapturePage({
   }
 
   /** `/feedback` opens the external feedback form and clears the command text,
-   *  staying in the capture bar (unlike the nav commands). No-op beyond the
-   *  clear when the URL isn't configured yet, so it never opens a dead page. */
+   *  staying in the capture bar (unlike the nav commands). */
   function openFeedback() {
     setInput("");
     setCaret(0);
-    focusInput(ref.current);
-    if (FEEDBACK_FORM_URL && isTauriRuntime()) {
-      void openFeedbackForm();
-    }
+    focusInput(inputRef.current);
+    if (isTauriRuntime()) void openFeedbackForm();
   }
 
   /** Leave the capture bar for another popup mode via a slash command. Suppress
@@ -334,7 +327,7 @@ export function CapturePage({
     }
     setAnchors(list);
     setAnchorPicking(true);
-    focusInput(ref.current);
+    focusInput(inputRef.current);
   }
 
   function bindAnchor(anchor: ReminderNode) {
@@ -344,7 +337,7 @@ export function CapturePage({
     setAnchorIndex(0);
     setInput("");
     setCaret(0);
-    focusInput(ref.current);
+    focusInput(inputRef.current);
   }
 
   /** Exit the link flow entirely (Esc / chip ✕), back to a normal capture. */
@@ -355,7 +348,7 @@ export function CapturePage({
     setAnchorIndex(0);
     setInput("");
     setCaret(0);
-    focusInput(ref.current);
+    focusInput(inputRef.current);
   }
 
   function handleInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -418,7 +411,7 @@ export function CapturePage({
       setIsAiResolving(false);
       setAiPreview(null);
       setAiMessage(null);
-      focusInput(ref.current);
+      focusInput(inputRef.current);
       return;
     }
     // Phase 3: Esc drops the link first; otherwise dismiss the window.
@@ -479,7 +472,7 @@ export function CapturePage({
     } finally {
       if (requestId === aiRequestId.current) {
         setIsAiResolving(false);
-        focusInput(ref.current);
+        focusInput(inputRef.current);
       }
     }
   }
@@ -494,7 +487,7 @@ export function CapturePage({
 
     if (!canSave) {
       if (input.trim()) playUiSound("captureError");
-      focusInput(ref.current);
+      focusInput(inputRef.current);
       return;
     }
     if (!isTauriRuntime()) return;
@@ -520,7 +513,7 @@ export function CapturePage({
         setLinkAnchor(null);
         onSaved();
         if (shouldHideAfterSave) await hideMainWindow();
-        else focusInput(ref.current);
+        else focusInput(inputRef.current);
         return;
       }
 
@@ -550,7 +543,7 @@ export function CapturePage({
       if (shouldHideAfterSave) {
         await hideMainWindow();
       } else {
-        focusInput(ref.current);
+        focusInput(inputRef.current);
       }
     } catch {
       // Silent.
@@ -594,7 +587,7 @@ export function CapturePage({
         ) : null}
 
         <HighlightedInput
-          inputRef={ref}
+          inputRef={inputRef}
           onChange={handleChange}
           onKeyDown={handleInputKeyDown}
           onSelect={handleSelect}

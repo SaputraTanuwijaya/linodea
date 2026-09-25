@@ -162,7 +162,6 @@ export interface Strings {
     intro: string;
     koFi: string;
     saweria: string;
-    comingSoon: string;
     feedbackTitle: string;
     feedbackHint: string;
     feedbackButton: string;
@@ -411,7 +410,6 @@ const STRINGS: Record<LanguageId, Strings> = {
         "Linodea is free and every feature is included. Donations keep it going.",
       koFi: "Ko-fi",
       saweria: "Saweria",
-      comingSoon: "Link coming soon",
       feedbackTitle: "Send feedback",
       feedbackHint:
         "Found a bug or have an idea? A short form comes straight to me.",
@@ -677,7 +675,6 @@ const STRINGS: Record<LanguageId, Strings> = {
         "Linodea gratis dan semua fitur sudah termasuk. Donasi membantu pengembangannya terus berjalan.",
       koFi: "Ko-fi",
       saweria: "Saweria",
-      comingSoon: "Tautan segera hadir",
       feedbackTitle: "Kirim masukan",
       feedbackHint:
         "Menemukan bug atau punya ide? Formulir singkat langsung sampai ke saya.",

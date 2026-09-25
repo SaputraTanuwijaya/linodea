@@ -3,7 +3,6 @@
  */
 
 export {
-  advanceReminderRecurrence,
   createReminderNodeCommand,
   deleteReminderNode,
   listReminderChains,
@@ -12,11 +11,6 @@ export {
   setReminderTags,
   updateReminderNode,
   updateReminderNodeStatus,
-  type AdvanceRecurrencePatch,
-  type MovePatch,
-  type ReminderTagsPatch,
-  type ReminderEditPatch,
-  type ReminderStatusPatch,
 } from "./api/commands";
 export {
   byScheduledAt,
@@ -26,18 +20,6 @@ export {
   groupChainsByTag,
   isActionable,
   primaryTag,
-  UNTAGGED,
-  type TagSection,
 } from "./model/reminder";
-export {
-  clearReminderFireRecord,
-  enableReminderNotifications,
-  notifyDueReminders,
-  type DueNotificationResult,
-  type NotificationPermissionState,
-} from "./lib/notifications";
-export {
-  startReminderNotificationScheduler,
-  type ReminderNotificationScheduler,
-} from "./lib/scheduler";
+export { clearReminderFireRecord } from "./lib/notifications";
 export { useReminderScheduler } from "./model/useReminderScheduler";

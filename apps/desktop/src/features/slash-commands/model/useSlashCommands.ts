@@ -66,9 +66,7 @@ export function useSlashCommands(
     if (!token.startsWith("/")) return [];
     const query = token.slice(1).toLowerCase();
     return SLASH_COMMANDS.filter((cmd) =>
-      [cmd.name, ...(cmd.aliases ?? [])].some((n) =>
-        n.toLowerCase().startsWith(query),
-      ),
+      cmd.name.toLowerCase().startsWith(query),
     ).map((command) => ({ command, ...command.strings(strings) }));
   }, [token, strings]);
 

@@ -100,9 +100,7 @@ function renderSegments(value: string): ReactNode[] {
     const endIdx = startIdx + text.length;
     const boundedLeft = startIdx === 0 || /\s/.test(value[startIdx - 1] ?? "");
     const boundedRight = endIdx === value.length || /\s/.test(value[endIdx] ?? "");
-    const isCommandish = Array.from(SLASH_COMMAND_NAMES).some((n) =>
-      n.startsWith(name),
-    );
+    const isCommandish = SLASH_COMMAND_NAMES.some((n) => n.startsWith(name));
 
     if (startIdx > last) segments.push(value.slice(last, startIdx));
     if (boundedLeft && boundedRight && isCommandish) {

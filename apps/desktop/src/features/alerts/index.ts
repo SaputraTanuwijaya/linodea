@@ -8,13 +8,9 @@
  */
 
 export {
-  ALERT_PRESENCE_IDS,
-  DEFAULT_ALERT_PRESENCE,
   alertProfile,
   getStoredAlertPresence,
   type AlertPresence,
-  type AlertProfile,
 } from "./model/alerts";
 export { useAlertPresence } from "./model/useAlertPresence";
-export { AlertsSection } from "./ui/AlertsSection";
 export { alertsSettingsSection } from "./settingsSection";

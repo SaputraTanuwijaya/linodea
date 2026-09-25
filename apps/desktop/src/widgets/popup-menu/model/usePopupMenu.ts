@@ -11,7 +11,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { isTauriRuntime } from "@/shared/lib";
@@ -36,8 +36,6 @@ const CAPTURE_WITH_MENU_HEIGHT = 300;
 export function usePopupMenu(mode: PopupMenuMode, dismissSignal?: unknown) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-
-  const close = useCallback(() => setAnchor(null), []);
 
   useEffect(() => {
     setAnchor(null);
@@ -124,7 +122,6 @@ export function usePopupMenu(mode: PopupMenuMode, dismissSignal?: unknown) {
   return {
     anchor,
     menuRef,
-    close,
     handleAction,
     handleContextMenu,
     handleMenuButtonClick,

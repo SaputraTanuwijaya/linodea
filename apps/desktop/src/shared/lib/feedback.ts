@@ -20,11 +20,8 @@ export async function openFeedbackForm(): Promise<void> {
     // Fall through — the plain form link still works.
   }
 
-  const url = feedbackFormUrl(version);
-  if (!url) return;
-
   try {
-    await openUrl(url);
+    await openUrl(feedbackFormUrl(version));
   } catch {
     // Nothing useful to do if the browser refuses to open.
   }

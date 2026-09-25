@@ -5,10 +5,5 @@
  */
 
 export { useAppUpdate } from "./model/useAppUpdate";
-export { AppUpdateSection } from "./ui/AppUpdateSection";
 export { appUpdateSettingsSection } from "./settingsSection";
-export type {
-  AppUpdateController,
-  AppUpdatePhase,
-  AppUpdateState,
-} from "./model/types";
+export type { AppUpdateController } from "./model/types";

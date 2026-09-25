@@ -1,12 +1,6 @@
 /**
- * External support links — the single place to fill in the donation and
- * feedback URLs before launch.
- *
- * These are read by Settings → Support (all three) and the `/feedback` slash
- * command (feedback only). An empty string means "not set up yet": the Support
- * buttons render disabled with a "coming soon" tag, and `/feedback` no-ops. So
- * the app ships now and never links to a page that does not exist — turning a
- * link on is a one-line edit here.
+ * External support links, read by Settings → Support (all three) and the
+ * `/feedback` slash command (feedback only).
  */
 
 export const KO_FI_URL = "https://ko-fi.com/stratsix";
@@ -37,7 +31,6 @@ const FEEDBACK_FORM_PREFILL =
  * the version can't be resolved, so the button can never fail to open.
  */
 export function feedbackFormUrl(version?: string): string {
-  if (!FEEDBACK_FORM_URL) return "";
   if (!version) return FEEDBACK_FORM_URL;
   return FEEDBACK_FORM_PREFILL.replace("__VERSION__", encodeURIComponent(version));
 }

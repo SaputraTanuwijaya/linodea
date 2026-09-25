@@ -6,6 +6,7 @@
  *   1. Add a CSS block in App.css with the eight `--lin-*` variables.
  *   2. Add a `ThemeDefinition` here with matching id + a small swatch
  *      preview used in the settings picker.
+ *   3. Add its name and description to `themes` in `shared/i18n/strings.ts`.
  *
  * The swatch values can mirror the CSS or diverge for hand-picked
  * preview colors; they exist only to render the picker card.
@@ -21,16 +22,12 @@ export interface ThemeSwatch {
 
 export interface ThemeDefinition {
   id: ThemeId;
-  name: string;
-  description: string;
   swatch: ThemeSwatch;
 }
 
 export const THEMES: ThemeDefinition[] = [
   {
     id: "dark",
-    name: "Dark",
-    description: "Default. Easy on the eyes for night capture.",
     swatch: {
       bg: "rgb(24 24 27)",
       surface: "rgb(39 39 42)",
@@ -39,8 +36,6 @@ export const THEMES: ThemeDefinition[] = [
   },
   {
     id: "light",
-    name: "Light",
-    description: "Bright surface for daytime use.",
     swatch: {
       bg: "rgb(255 255 255)",
       surface: "rgb(244 244 245)",

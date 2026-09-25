@@ -1,27 +1,20 @@
 /**
  * Support section UI.
  *
- * Renders inside a SettingsSection wrapper — no title, no hint paragraph
- * (those live on the section wrapper). Three external links: two donations
- * (Ko-fi, Saweria) and a feedback form.
- *
- * The URLs are not live yet. A link stays disabled ("coming soon") until its
- * constant in `shared/config/links.ts` holds a real URL, so the section can
- * ship without ever pointing at a dead page — filling in the URL later is the
- * whole change. External navigation uses `openUrl` (same pattern as
- * AiAssistSection), which only works in the Tauri runtime.
+ * Three external links: two donations (Ko-fi, Saweria) and a feedback form.
+ * External navigation uses `openUrl`, which only works in the Tauri runtime.
  */
 
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ReactNode } from "react";
 
-import { FEEDBACK_FORM_URL, KO_FI_URL, SAWERIA_URL } from "@/shared/config";
+import { KO_FI_URL, SAWERIA_URL } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
 import { isTauriRuntime, openFeedbackForm } from "@/shared/lib";
 
 export function SupportSection({ strings }: { strings: Strings }) {
   async function open(url: string) {
-    if (!url || !isTauriRuntime()) return;
+    if (!isTauriRuntime()) return;
     await openUrl(url);
   }
 
@@ -36,15 +29,11 @@ export function SupportSection({ strings }: { strings: Strings }) {
             icon={<LogoChip src="/brand/kofi.svg" />}
             label={strings.support.koFi}
             onOpen={() => void open(KO_FI_URL)}
-            soonLabel={strings.support.comingSoon}
-            url={KO_FI_URL}
           />
           <LinkButton
             icon={<LogoChip fill src="/brand/Saweria_512px.png" />}
             label={strings.support.saweria}
             onOpen={() => void open(SAWERIA_URL)}
-            soonLabel={strings.support.comingSoon}
-            url={SAWERIA_URL}
           />
         </div>
       </section>
@@ -63,8 +52,6 @@ export function SupportSection({ strings }: { strings: Strings }) {
             accent
             label={strings.support.feedbackButton}
             onOpen={() => void openFeedbackForm()}
-            soonLabel={strings.support.comingSoon}
-            url={FEEDBACK_FORM_URL}
           />
         </div>
       </section>
@@ -72,26 +59,18 @@ export function SupportSection({ strings }: { strings: Strings }) {
   );
 }
 
-/**
- * External-link button. Disabled with a "coming soon" hint until its URL is
- * filled in, so a not-yet-created page can never be opened.
- */
+/** External-link button. */
 function LinkButton({
   accent = false,
   icon,
   label,
   onOpen,
-  soonLabel,
-  url,
 }: {
   accent?: boolean;
   icon?: ReactNode;
   label: string;
   onOpen: () => void;
-  soonLabel: string;
-  url: string;
 }) {
-  const ready = url.length > 0;
   const style = accent
     ? "bg-[var(--lin-accent)] text-[var(--lin-bg)]"
     : "border border-[var(--lin-border)] text-[var(--lin-text)] transition hover:border-[var(--lin-text-dim)] hover:bg-[var(--lin-bg-hover)]";
@@ -99,19 +78,13 @@ function LinkButton({
   return (
     <span className="inline-flex items-center gap-2">
       <button
-        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50 ${style}`}
-        disabled={!ready}
+        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium ${style}`}
         onClick={onOpen}
         type="button"
       >
         {icon}
         {label}
       </button>
-      {ready ? null : (
-        <span className="text-[11px] leading-4 text-[var(--lin-text-mute)]">
-          {soonLabel}
-        </span>
-      )}
     </span>
   );
 }

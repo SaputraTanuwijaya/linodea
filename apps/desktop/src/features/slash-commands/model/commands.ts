@@ -21,7 +21,6 @@ export type SlashCommandKind = "parse-modifier" | "action";
 export interface SlashCommand {
   /** Bare command name without the leading slash, e.g. "countdown". */
   name: string;
-  aliases?: string[];
   kind: SlashCommandKind;
   /**
    * Text inserted when an `action` command is picked (parse-modifiers insert
@@ -85,9 +84,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-/** Lower-cased set of every command name + alias, for the input highlighter. */
-export const SLASH_COMMAND_NAMES: ReadonlySet<string> = new Set(
-  SLASH_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]).map((n) =>
-    n.toLowerCase(),
-  ),
+/** Lower-cased command names, for the input highlighter. */
+export const SLASH_COMMAND_NAMES: readonly string[] = SLASH_COMMANDS.map((c) =>
+  c.name.toLowerCase(),
 );

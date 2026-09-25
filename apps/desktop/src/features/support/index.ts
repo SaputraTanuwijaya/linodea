@@ -5,5 +5,4 @@
  * static (external links only) — no hook, no state.
  */
 
-export { SupportSection } from "./ui/SupportSection";
 export { supportSettingsSection } from "./settingsSection";
