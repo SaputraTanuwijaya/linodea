@@ -52,49 +52,10 @@ export function normalizeTag(raw: string): string | null {
   return tag && /^\p{L}/u.test(tag) ? tag : null;
 }
 
-/**
- * Normalize a list of tags: drop unusable ones, dedupe (first spelling wins),
- * and cap at `MAX_TAGS_PER_REMINDER`. Order is preserved, so `tags[0]` stays
- * the tag the user typed first — the chain view groups on it.
- */
-export function normalizeTags(raw: readonly string[]): string[] {
-  const tags = new Set<string>();
-  for (const value of raw) {
-    const tag = normalizeTag(value);
-    if (tag) tags.add(tag);
-    if (tags.size >= MAX_TAGS_PER_REMINDER) break;
-  }
-  return [...tags];
-}
-
-export const NOTIFICATION_MODES = [
-  "quiet",
-  "balanced",
-  "aggressive",
-  "phone_first",
-  "desktop_only",
-] as const;
-
-export type NotificationMode = (typeof NOTIFICATION_MODES)[number];
-
-export const NOTIFICATION_ATTEMPT_STATUSES = [
-  "pending",
-  "sent",
-  "displayed",
-  "acked",
-  "dismissed",
-  "canceled",
-  "failed",
-] as const;
-
-export type NotificationAttemptStatus =
-  (typeof NOTIFICATION_ATTEMPT_STATUSES)[number];
-
 export type IsoDateTimeString = string;
 export type IanaTimezone = string;
 export type ReminderNodeId = string;
 export type DeviceId = string;
-export type ShortcutChord = string;
 
 export interface ReminderNode {
   id: ReminderNodeId;
@@ -132,26 +93,6 @@ export interface ChainNode {
   node: ReminderNode;
   children: ChainNode[];
 }
-
-export type ReminderPatch = Partial<
-  Pick<
-    ReminderNode,
-    | "title"
-    | "description"
-    | "scheduledAt"
-    | "timezone"
-    | "type"
-    | "status"
-    | "tags"
-    | "parentId"
-    | "previousId"
-    | "nextId"
-    | "checklist"
-    | "confidence"
-    | "completedAt"
-    | "snoozedUntil"
-  >
->;
 
 export const RECURRENCE_FREQUENCIES = ["daily", "weekly", "monthly"] as const;
 
@@ -222,70 +163,4 @@ export interface ReminderParseResult {
   countdown?: boolean;
   /** Repeat rule, when the input described a recurring reminder. */
   recurrence?: Recurrence;
-}
-
-export interface ShortcutSettings {
-  quickCapture: ShortcutChord;
-  openMainApp?: ShortcutChord;
-  shortcutsEnabled: boolean;
-  disabledUntil?: IsoDateTimeString;
-}
-
-export interface StartupSettings {
-  launchOnStartup: boolean;
-  startMinimizedToTray: boolean;
-}
-
-export interface NotificationSettings {
-  mode: NotificationMode;
-  desktopEnabled: boolean;
-  audioEnabled: boolean;
-}
-
-export interface AppSettings {
-  schemaVersion: number;
-  timezone: IanaTimezone;
-  shortcuts: ShortcutSettings;
-  startup: StartupSettings;
-  notifications: NotificationSettings;
-  createdOnDeviceId: DeviceId;
-  createdAt: IsoDateTimeString;
-  updatedAt: IsoDateTimeString;
-}
-
-export interface NotificationAttempt {
-  id: string;
-  reminderId: ReminderNodeId;
-  stage: "prealert" | "due" | "fallback";
-  status: NotificationAttemptStatus;
-  dedupeKey: string;
-  scheduledFor: IsoDateTimeString;
-  attemptedAt?: IsoDateTimeString;
-  createdAt: IsoDateTimeString;
-  updatedAt: IsoDateTimeString;
-}
-
-function isOneOf<const Values extends readonly string[]>(
-  values: Values,
-  value: unknown,
-): value is Values[number] {
-  return typeof value === "string" && (values as readonly string[]).includes(value);
-}
-
-export function isReminderType(value: unknown): value is ReminderType {
-  return isOneOf(REMINDER_TYPES, value);
-}
-
-export function isReminderStatus(value: unknown): value is ReminderStatus {
-  return isOneOf(REMINDER_STATUSES, value);
-}
-
-export function isNotificationMode(value: unknown): value is NotificationMode {
-  return isOneOf(NOTIFICATION_MODES, value);
-}
-
-export function isNotificationAttemptStatus(
-  value: unknown,
-): value is NotificationAttemptStatus {
-  return isOneOf(NOTIFICATION_ATTEMPT_STATUSES, value);
 }
