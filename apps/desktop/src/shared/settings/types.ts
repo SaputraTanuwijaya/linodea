@@ -40,8 +40,8 @@ export interface SettingsSlot<T, U = T> {
  * The union of every feature's settings state, passed down once by
  * SettingsPage. Each section component pulls only what it needs.
  *
- * Adding a feature: extend this with a new slot, populate it in the bundle
- * builder where `useSettingsBundle` lives, and add the section descriptor.
+ * Adding a feature: extend this with a new slot, populate it in
+ * `app/model/useAppSettings.ts`, and add the section descriptor.
  */
 export interface SettingsBundle {
   strings: Strings;
@@ -59,7 +59,7 @@ export interface SettingsBundle {
  *
  *   - `id` is stable, used as React key and for any later persistence.
  *   - `title` and `hint` are selectors so they can interpolate from strings.
- *   - `Component` is rendered inside the SettingsSection wrapper; it receives
+ *   - `Component` is rendered under the section's title and hint; it receives
  *     the full bundle and picks what it needs.
  */
 export interface SettingsSectionDescriptor {

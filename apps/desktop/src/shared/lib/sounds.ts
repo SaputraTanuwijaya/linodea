@@ -4,7 +4,7 @@
  * Sounds are played through a Web Audio gain node rather than the audio
  * element's own `volume`, because `volume` caps at 1.0 and the shipped ping is
  * mastered quiet enough that full element volume still read as "too silent"
- * (S84 feedback). Gain can go above 1, so the alert's presence level can
+ * to users. Gain can go above 1, so the alert's presence level can
  * actually amplify it.
  *
  * The routing is only wired once the AudioContext is confirmed *running*:

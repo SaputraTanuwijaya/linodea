@@ -1,8 +1,8 @@
 /**
  * Tag → color mapping for the chain view (section headers + node dots).
  *
- * This replaced a fixed `Record<ReminderCategory, string>`. Tags are open-ended,
- * so a color can't be assigned per name up front — it's derived by hashing the
+ * Tags are open-ended, so a color can't be assigned per name up front — it's
+ * derived by hashing the
  * tag into a fixed palette. Two consequences worth knowing:
  *
  *  - the same tag always gets the same color, on every machine and across
@@ -13,8 +13,7 @@
  * The values point at `--lin-tag-*` CSS variables defined per theme in
  * `app/App.css`, so colors stay theme-aware (dark vs light) in one place. Used
  * via inline `style` because Tailwind can't statically extract a templated
- * arbitrary-value class. The future paid "custom tag colors" cosmetic will
- * override the CSS variables per user, leaving this file untouched.
+ * arbitrary-value class.
  */
 
 /** Palette slots a tag can hash into. Order is stable — changing it recolors

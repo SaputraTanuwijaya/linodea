@@ -1,13 +1,12 @@
 /**
- * Reminder notification polling loop.
+ * One scheduler pass: decides what fires now, what is missed, and when the
+ * next fire is due.
  *
  * Lives in the reminder entity because it composes reminder lifecycle
- * (fire dispatch + missed/recurrence transitions) with notification dispatch.
- * A due reminder is NOT auto-completed — see the T-due branch. It reads two feature
- * configs (prealerts, language) but does not import from features/ —
- * instead it pulls from the underlying registries and storage helpers in
- * shared/i18n and feature model files. (Both directions are valid: this
- * file is one layer up, so importing from `features/*` is allowed.)
+ * (fire dispatch + missed/recurrence transitions) with alert dispatch. A due
+ * reminder is NOT auto-completed — see the T-due branch. It reads the prealert
+ * and alert-presence settings straight from storage, since it runs outside
+ * React.
  *
  * Dedupe is stored in SQLite (the `reminder_fire_state` table), keyed
  * per-reminder, per-stage, so a cleared webview cache can't lose it and re-fire
@@ -61,10 +60,10 @@ const MS_PER_MINUTE = 60_000;
  * While the app runs, the precise timer / 15s backstop fires within ~15s of due,
  * so being overdue at all means we weren't watching when it came due (the app
  * was quit, or the machine was asleep so timers didn't tick). Two bands:
- *   - overdue by ≤ this window → *late-fire*: pop the alert now and auto-done as
- *     usual. The user just came back (relaunch / wake), so a slightly-late alert
- *     is still useful, not a silent completion. 15s ≪ this window, so a running
- *     app's on-time fires are never near the boundary.
+ *   - overdue by ≤ this window → *late-fire*: pop the alert now. The user just
+ *     came back (relaunch / wake), so a slightly-late alert is still useful.
+ *     15s ≪ this window, so a running app's on-time fires are never near the
+ *     boundary.
  *   - overdue by > this window → `missed`: too stale to ambush the user with a
  *     surprise alert, so surface it (persistent, in the list) instead of firing.
  *
@@ -109,7 +108,7 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
  * Poll-tick driver. Reads the current prealert config, walks every
  * actionable reminder, and:
  *   - marks a non-recurring reminder `missed` if it came due while the app was
- *     off (well past due, never fired) — no stale alert, no auto-done,
+ *     off (well past due, never fired) — no stale alert,
  *   - fires any prealert whose window has been crossed and not yet fired,
  *   - fires the T-due toast (once) when due time has passed, leaving the
  *     reminder `pending` (acknowledge-to-complete — done only on the user's
@@ -148,7 +147,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 
     // Came due while we weren't watching AND is now too stale to surprise-fire
     // (more than the late-fire window past due, never fired): mark it `missed`
-    // instead of firing a stale alert and auto-doning it. Reminders overdue by
+    // instead of firing a stale alert. Reminders overdue by
     // less than the window fall through and *late-fire* below. Recurring
     // reminders are left to roll forward on their own (existing fire+advance).
     if (!record.due && !reminder.recurrence && dueMs <= now - LATE_FIRE_WINDOW_MS) {
@@ -199,7 +198,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
       }
     }
 
-    // T-due — fire, then either re-arm (recurring) or auto-done ------
+    // T-due — fire, then re-arm (recurring) or wait for the user's Done ---
     if (!record.due) {
       if (dueMs <= now) {
         showAlert({
@@ -267,7 +266,7 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
 
   // Flush the pass's dedupe changes to SQLite. Rare in practice — only reminders
   // that actually fired this pass. Swallow per-write failures: a dropped write
-  // just re-fires next pass, matching the pre-S64 best-effort localStorage write.
+  // just re-fires next pass.
   for (const id of removed) {
     await clearReminderFireRecordCommand(id).catch(() => undefined);
   }

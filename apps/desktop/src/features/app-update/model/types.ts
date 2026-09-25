@@ -28,7 +28,7 @@ export interface AppUpdateState {
   supported: boolean;
   /** Running app version. Null until read, or if the read fails. */
   currentVersion: string | null;
-  /** Version offered by the feed. Set in "available" / "downloading" only. */
+  /** Version offered by the feed, once a check has found one. */
   nextVersion: string | null;
 }
 

@@ -87,9 +87,6 @@ export interface Strings {
     clearTags: string;
     clear: string;
   };
-  // A `category` block used to sit here with six translated names. Tags are
-  // user-authored text, so there is nothing to translate — the tag itself is
-  // the label, in whatever language the user typed it.
   settings: {
     appearance: { title: string; hint: string };
     notifications: { title: string; hint: (max: number) => string };

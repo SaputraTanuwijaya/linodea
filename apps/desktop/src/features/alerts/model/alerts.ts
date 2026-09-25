@@ -1,7 +1,7 @@
 /**
  * Alert presence — how hard a fired reminder tries to get noticed.
  *
- * Early feedback (S84) was that the alert is "too silent" and "too small for
+ * Early user feedback was that the alert is "too silent" and "too small for
  * reminding". Both are the same complaint from two angles: the card was tuned
  * for not-distracting, and landed below the threshold where it actually
  * reminds anyone. Rather than just move the numbers and trade one complaint for
@@ -57,7 +57,7 @@ export interface AlertProfile {
 }
 
 export const ALERT_PROFILES: Record<AlertPresence, AlertProfile> = {
-  // The pre-S84 alert, kept for anyone who liked it that way.
+  // The original, quieter alert, kept for anyone who liked it that way.
   subtle: {
     volume: 0.7,
     dwellMs: 20_000,
@@ -99,7 +99,7 @@ function isAlertPresence(value: unknown): value is AlertPresence {
 }
 
 /**
- * Read outside React too: the notification driver reads it on each poll tick to
+ * Read outside React too: the scheduler reads it on each pass to
  * stamp the alert payload, exactly as it reads the prealert config.
  */
 export function getStoredAlertPresence(): AlertPresence {

@@ -9,9 +9,6 @@
  * the raw text through the same parser as capture), Delete. After any mutation
  * it refetches and calls `onMutate` so App can re-sync the notification
  * scheduler (fire times may have changed).
- *
- * Stop-gap surface — the lifecycle *commands* are permanent, but this list UI
- * is replaced by the linked-list chain view in Phase 2.
  */
 
 import { parseReminder } from "@linodea/parser";

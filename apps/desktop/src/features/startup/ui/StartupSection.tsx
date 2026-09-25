@@ -1,8 +1,7 @@
 /**
  * Startup section UI.
  *
- * Renders inside a SettingsSection wrapper. Just the toggle row — no title,
- * no hint paragraph (those live on the section wrapper).
+ * Just the toggle row — SettingsPage renders the title and hint above it.
  */
 
 import type { Strings } from "@/shared/i18n";

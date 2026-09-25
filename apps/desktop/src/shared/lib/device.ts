@@ -2,8 +2,7 @@
  * Device identity helper.
  *
  * Generates a stable per-device UUID on first call and persists it in
- * localStorage. Used as `createdOnDeviceId` for new reminders so future sync
- * (Phase 2+) can attribute writes to a device.
+ * localStorage. Stored on each new reminder as `createdOnDeviceId`.
  */
 
 const STORAGE_KEY = "linodea.deviceId";

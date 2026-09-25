@@ -1,10 +1,9 @@
 /**
  * Public surface for the language feature.
  *
- * `getStoredLanguage` is exposed for the notification driver
- * (entities/reminder/lib/notifications.ts) which reads the language directly
- * from storage on each poll tick. `applyLanguage` is exposed for the
- * pre-mount bootstrap in main.tsx.
+ * `getStoredLanguage` is exposed for the alert, timer and confirm windows,
+ * which read the language directly from storage. `applyLanguage` is exposed
+ * for the pre-mount bootstrap in main.tsx.
  */
 
 export {

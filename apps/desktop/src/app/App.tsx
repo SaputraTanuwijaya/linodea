@@ -63,11 +63,6 @@ function App() {
 
   useConfirmResultRouting(setAutostart);
 
-  // The first-run launch-on-boot prompt is triggered from Rust setup() (see
-  // desktop::prompt_launch_on_boot). It used to fire from a hidden-window
-  // setTimeout here, but WebView2 throttles timers in the hidden main window, so
-  // it fired unreliably. Rust owns the trigger + the answered marker now.
-
   // Refocus the capture input whenever the window comes back, so the popup is
   // always type-ready without a click.
   useEffect(() => {

@@ -3,18 +3,15 @@
  *
  * Check and download run silently in the background; only the restart asks.
  *
- * v0.1.2 tried announcing a found update through the themed confirm window on a
- * timer after mount. That failed on the installed build for two reasons worth
- * recording, because both are structural rather than fixable bugs:
+ * There is deliberately no prompt, for two structural reasons:
  *   1. Windows refuses foreground to a background process, and the confirm
- *      window sets `skipTaskbar`, so it had nothing to flash — it showed but
- *      never came forward. (The alert window works precisely because it never
- *      calls `set_focus`.)
- *   2. More importantly, the only moment the app reliably *has* foreground is
- *      when the user summons the capture bar — and hijacking that with an
- *      update dialog breaks the one promise the app exists to keep.
- * So there is no prompt. An update that is downloaded and ready surfaces as a
- * quiet badge (see `phase === "ready"`); the Settings panel carries the detail.
+ *      window sets `skipTaskbar`, so a background prompt shows but never comes
+ *      forward.
+ *   2. The only moment the app reliably *has* foreground is when the user
+ *      summons the capture bar, and hijacking that with an update dialog
+ *      breaks the one promise the app exists to keep.
+ * An update that is downloaded and ready surfaces as a quiet badge (see
+ * `phase === "ready"`); the Settings panel carries the detail.
  *
  * Failure is always silent-and-inert on the auto path: no network, no feed
  * published yet, a GitHub hiccup — none of it may block capture.
@@ -36,8 +33,8 @@ import {
 /**
  * Delay before the automatic check, so a cold start spends its first seconds on
  * the things the user is waiting for (window, DB, scheduler) rather than a
- * network round-trip. Nothing announces itself now, so the exact value is not
- * load-bearing the way it was in v0.1.2.
+ * network round-trip. Nothing announces itself, so the exact value is not
+ * load-bearing.
  */
 const AUTO_CHECK_DELAY_MS = 20_000;
 

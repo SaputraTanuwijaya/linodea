@@ -2,8 +2,8 @@
  * Prealert configuration registry.
  *
  * The user picks 0-3 offsets in Settings. Each offset is the number
- * of minutes before T-due that a prealert toast fires. T-due itself
- * is fixed and always fires (auto-marking the reminder `done`).
+ * of minutes before T-due that a prealert fires. T-due itself
+ * is fixed and always fires.
  *
  * Internally everything is stored in total-minutes. The UI lets the
  * user enter the value in days / hours / minutes, but the wire format

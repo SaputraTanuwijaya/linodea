@@ -4,8 +4,8 @@
  * Reads the assembled forest from `list_reminder_chains` (Rust owns ordering +
  * integrity). Roots are bucketed under tag section headers. Within a section a
  * small lane layout draws the connectors: roots share one vertical trunk, each
- * child hooks off its parent with a curved elbow (git's color + consistency,
- * YouTube's shape). Done / cancelled nodes are dimmed but kept, so the tree
+ * child hooks off its parent with a curved elbow. Done / cancelled nodes are
+ * dimmed but kept, so the tree
  * never loses its shape.
  *
  * **Grouping key is `tags[0]`, not the whole tag list.** A reminder can carry up

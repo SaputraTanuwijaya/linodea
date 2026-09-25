@@ -4,7 +4,7 @@
  * The Preview button fires a real alert window at the selected level — the only
  * honest way to judge "is this loud enough, is this big enough", which is what
  * the feedback was about. It sends a `prealert`-kind alert deliberately: a
- * prealert's single Dismiss touches no reminder state (S65), so previewing can
+ * prealert's single Dismiss touches no reminder state, so previewing can
  * never complete, snooze or reschedule anything.
  */
 

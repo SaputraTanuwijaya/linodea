@@ -8,10 +8,9 @@
  *   - "autostartOff" — confirm turning OFF launch-on-startup in Settings
  *                      (reduces reliability the same way quitting does).
  *
- * Note: every kind here is triggered while the app already owns the foreground.
- * v0.1.2 briefly added an "update" kind fired from the background, which
- * Windows would not bring forward (foreground lock + `skipTaskbar` = nothing to
- * flash). Removed in v0.1.3 — background news is badged, not prompted.
+ * Every kind here is triggered while the app already owns the foreground.
+ * Windows will not bring a prompt forward for a background process, so
+ * background news (a ready update) is badged, never prompted.
  *
  * Themed + i18n like the rest of the app, so it replaces the native OS dialog
  * (which read as an error/system alert and broke the app's visual language).

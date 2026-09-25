@@ -4,8 +4,7 @@
  * Rust shows this small, always-on-top, non-focusing window at a reminder's
  * fire time and emits `linodea:notify` with the payload. This is the primary
  * notification surface — it bypasses the OS toast (and Windows Focus Assist),
- * and renders with the app's own theme + i18n. The OS toast survives only as a
- * future app-off fallback.
+ * and renders with the app's own theme + i18n.
  *
  * Notifications are QUEUED, not overwritten: a prealert and its due fire can
  * land in the same scheduler pass (microseconds apart) — without a queue the
@@ -20,14 +19,14 @@
  * offers a single Dismiss that just closes the card (same effect as the
  * auto-dismiss). The reminder still fires at its actual due time.
  *
- * Dwell/sound policy (v0.1.2): since S72 removed silent auto-completion, these
- * buttons are the ONLY way a reminder gets marked done — so the card has to
+ * Dwell/sound policy: a fired reminder is never completed automatically, so
+ * these buttons are the ONLY way it gets marked done — the card has to
  * survive long enough to actually reach. It pauses entirely while the pointer
  * is over it so it can't vanish mid-reach, and any hover silences the
  * remaining pings: once you've clearly seen it, it shuts up.
  *
  * How long it stays, how loud and how often it pings, and how big the type is
- * all come from the payload's `presence` (S84) — one user-facing dial, since
+ * all come from the payload's `presence` — one user-facing dial, since
  * early feedback was that the card was both too quiet and too small to work as
  * a reminder. Rust sizes the window from the same value.
  */

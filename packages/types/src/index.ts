@@ -19,12 +19,8 @@ export const REMINDER_STATUSES = [
 export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
 
 /**
- * Tags replaced the old closed `ReminderCategory` enum (university / investing /
- * personal / tutoring / urgent / waiting). That set was one person's life, not a
- * taxonomy: it had near-zero recall for anyone else, and it mixed two axes —
- * domains (university) with states (urgent, waiting) — so a reminder that was
- * both had to arbitrarily pick one. Tags are free text the user authors, so
- * there is nothing to guess and nothing to generalize.
+ * Tags are free text the user authors (`#kerja`, `#skripsi`), so there is
+ * nothing to guess and nothing to generalize.
  */
 
 /** Max characters in one tag, after normalization. */

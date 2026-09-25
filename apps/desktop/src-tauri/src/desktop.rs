@@ -20,14 +20,12 @@ const TIMER_WINDOW_LABEL: &str = "timer";
 const CONFIRM_WINDOW_LABEL: &str = "confirm";
 const NOTIFY_EVENT: &str = "linodea:notify";
 const TIMER_EVENT: &str = "linodea:timer";
-/// Carries the confirmation kind ("quit" | "autostart") to the confirm window.
+/// Carries the confirmation kind ("quit" | "autostart" | "autostartOff") to the
+/// confirm window.
 const CONFIRM_EVENT: &str = "linodea:confirm";
-// Grown from 360x120 in v0.1.2: the 30s dwell needs room for larger Snooze/Done
-// hit targets (they were reported as hard to click, and since S72 they are the
-// only path to completing a reminder).
 /// Alert window size per presence level (see `features/alerts`). Rust owns the
 /// window, so it owns these; everything rendered inside the card is set by the
-/// webview from the same presence value. "Subtle" is the pre-S84 size, which
+/// webview from the same presence value. "Subtle" is the original size, which
 /// early users reported as too small to actually remind them — hence a larger
 /// default and a level above it.
 const ALERT_SIZE_SUBTLE: (f64, f64) = (360.0, 140.0);
@@ -43,7 +41,6 @@ fn alert_size(presence: Option<&str>) -> (f64, f64) {
         _ => ALERT_SIZE_NORMAL,
     }
 }
-// 120 -> 136: the progress bar under the digits needs the extra row.
 const TIMER_SIZE: (f64, f64) = (220.0, 136.0);
 const CONFIRM_SIZE: (f64, f64) = (380.0, 200.0);
 /// Logical gap from the screen edges; the extra bottom slack clears the taskbar.
@@ -118,8 +115,7 @@ pub struct AlertPayload {
 pub fn show_alert(app: &AppHandle, payload: AlertPayload) -> tauri::Result<()> {
     // Both windows pin to the same bottom-right anchor, and the timer hides
     // *itself* when its countdown hits zero — the same instant the alert fires.
-    // Whichever won that race decided whether the timer covered the alert, so
-    // the bug was intermittent (seen in S74, absent in S75, code unchanged).
+    // Whichever won that race decided whether the timer covered the alert.
     // Hiding it here makes the order explicit instead of raced. The timer is
     // display-only, so an alert outranks it.
     let _ = hide_timer(app);
@@ -174,8 +170,8 @@ pub fn hide_timer(app: &AppHandle) -> tauri::Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmPayload {
-    /// "quit" | "autostart" | "autostartOff" | "update". Passed through
-    /// unchanged — new kinds are frontend-only (copy + result handling).
+    /// "quit" | "autostart" | "autostartOff". Passed through unchanged — new
+    /// kinds are frontend-only (copy + result handling).
     pub kind: String,
 }
 
@@ -217,11 +213,10 @@ fn boot_prompt_marker_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// Whether the first-run launch-on-boot prompt has already been answered.
-/// Persisted as a marker file, decided in Rust at startup. This deliberately
-/// replaces the old localStorage flag + hidden-window `setTimeout`: WebView2
-/// throttles/suspends timers in the hidden main window (the same reason the
-/// scheduler needs its 15s backstop), so the prompt fired unreliably. Rust
-/// setup runs unthrottled, so the trigger is now deterministic.
+/// Persisted as a marker file and decided in Rust at startup, not from a timer
+/// in the webview: WebView2 throttles timers in the hidden main window (the
+/// same reason the scheduler needs its 15s backstop), while Rust setup runs
+/// unthrottled.
 pub fn is_boot_prompt_answered(app: &AppHandle) -> bool {
     boot_prompt_marker_path(app)
         .map(|path| marker_answered(&path))

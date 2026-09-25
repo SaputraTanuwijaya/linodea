@@ -1,8 +1,7 @@
 /**
  * Updates section UI.
  *
- * Renders inside a SettingsSection wrapper — no title, no hint paragraph
- * (those live on the section wrapper).
+ * The panel body only — SettingsPage renders the title and hint above it.
  */
 
 import type { Strings } from "@/shared/i18n";

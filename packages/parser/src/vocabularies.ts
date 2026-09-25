@@ -3,8 +3,8 @@
  * can iterate them. Each list is the canonical spelling; typos and variants
  * are recognized at runtime via `fuzzyMatch`, not by enumerating misspellings here.
  *
- * Language tags exist to support future Parser v2 work (mixed-language
- * richness, per-language threshold tuning). Today they're informational.
+ * Each entry's language tag lets `resolveByLanguage` break a fuzzy tie toward
+ * the user's preferred language.
  */
 
 export type LangTag = "en" | "id";
@@ -77,19 +77,6 @@ export const TYPE_DEADLINE_WORDS: VocabularyEntry[] = [
 export const TYPE_COOLDOWN_WORDS: VocabularyEntry[] = [
   ...en("cooldown", "cool down", "cool-off", "cool off"),
 ];
-
-// --- Categories: removed ---
-//
-// Six `CATEGORY_*` vocabularies (~90 keywords) used to live here, driving an
-// exact-then-fuzzy categorizer. They are gone, replaced by user-authored `#tag`
-// tokens the parser only has to *extract* — no guessing. The lists were one
-// person's life (university / investing / tutoring), so 19 of 20 ordinary
-// captures came back uncategorized, and when a keyword did hit it could be
-// confidently wrong: `thesis` sat in the investing list (an *investment*
-// thesis), sending "Thesis Discussion with Sir John" to investing. A single
-// keyword anywhere in the raw input decided the answer, in a fixed priority
-// order, with a distance-1 fuzzy fallback over all ~90 words — no mechanism at
-// that shape can tell the two senses of "thesis" apart.
 
 // --- Number words (spelled-out integers, EN + ID) ---
 //

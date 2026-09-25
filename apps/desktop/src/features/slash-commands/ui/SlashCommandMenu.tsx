@@ -7,7 +7,7 @@
  * where the room is. Mirrors `widgets/popup-menu` styling.
  *
  * `maxListHeight` is the room the caller actually has on screen. Below that the
- * list scrolls rather than growing past the window edge, where rows used to be
+ * list scrolls rather than growing past the window edge, where rows would be
  * silently cut off — on a scaled 1080p laptop the full eight-command list needs
  * more vertical room than the screen has below a centered capture bar.
  */

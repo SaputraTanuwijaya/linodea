@@ -74,7 +74,7 @@ export function useReminderScheduler({
     // The very first sync can land before the Tauri IPC bridge is ready at cold
     // start; `listReminderNodes()` then fails, the scheduler swallows it, and
     // nothing is marked missed — so the badge/list only caught up on a later
-    // interaction-triggered sync (the reported bug). `sync()` returns a result
+    // interaction-triggered sync. `sync()` returns a result
     // on success and `undefined` on failure, so retry a few times until one
     // lands. (The 15s backstop would eventually recover it; this just makes the
     // first pass prompt so the missed badge shows right after relaunch.)

@@ -3,7 +3,7 @@
  *
  * `getStoredPrealerts` and `sortDescending` are exposed for the notification
  * driver (entities/reminder/lib/notifications.ts) which runs outside React
- * and reads the config directly from storage on each poll tick.
+ * and reads the config directly from storage on each scheduler pass.
  */
 
 export {

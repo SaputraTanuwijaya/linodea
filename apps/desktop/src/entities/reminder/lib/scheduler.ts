@@ -1,9 +1,9 @@
 /**
  * Precise in-process notification scheduler.
  *
- * Replaces the old fixed 15s polling loop. Each `sync()`:
+ * Each `sync()`:
  *   1. runs a `notifyDueReminders()` pass — fires anything already due /
- *      crossed, dedupes, auto-dones (unchanged behavior);
+ *      crossed, dedupes, marks stale reminders missed;
  *   2. reads the pass's `nextFireMs` (earliest still-unfired prealert / due
  *      instant) and arms a single `setTimeout` for exactly that moment.
  *
@@ -15,22 +15,18 @@
  * reliability floor. WebView2/Chromium throttles (and can effectively suspend)
  * `setTimeout` in a HIDDEN window, so a far-out precise timer can't be trusted
  * to fire on time while the popup is hidden. A short, dumb interval still fires
- * reliably (interval throttling enforces a minimum cadence, not suspension) —
- * which is exactly how the pre-S28 15s poll delivered toasts while hidden. We
- * keep that 15s floor so worst-case latency matches the old proven behavior;
- * the precise timer is a foreground accuracy bonus on top, not the sole path.
+ * reliably (interval throttling enforces a minimum cadence, not suspension),
+ * so the 15s floor bounds worst-case latency; the precise timer is a
+ * foreground accuracy bonus on top, not the sole path.
  *
- * Not in scope here (deliberately deferred — see S28 notes / notification
- * strategy doc): native OS-level scheduling (Windows `ToastNotificationManager`
- * etc.) that fires while the app is fully quit. That is per-platform Rust,
- * only verifiable from an installed build, and the always-on-tray model makes
- * it a narrow win.
+ * Nothing here fires while the app is quit — reminders fire only while it
+ * runs, which is why the tray keeps it running.
  */
 
 import { notifyDueReminders, type DueNotificationResult } from "./notifications";
 
-/** Reliability floor. Matches the proven pre-S28 poll cadence so a throttled /
- * suspended precise timer in a hidden window can't delay a toast beyond ~15s. */
+/** Reliability floor: a throttled / suspended precise timer in a hidden window
+ * can't delay an alert beyond ~15s. */
 const BACKSTOP_INTERVAL_MS = 15_000;
 
 /** `setTimeout` clamps delays above ~2^31-1 ms to fire immediately. Cap armed

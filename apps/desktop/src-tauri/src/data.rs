@@ -125,8 +125,7 @@ pub struct ReminderStatusPatch {
 
 /// Full-content edit of an existing reminder. Distinct from `ReminderStatusPatch`
 /// (status/lifecycle) — this changes the user-authored fields, re-derived by
-/// re-parsing the edited raw text on the UI side. Also the primitive a future
-/// AI-assisted chain editor would call to "alter" a node.
+/// re-parsing the edited raw text on the UI side.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReminderEditPatch {
@@ -158,8 +157,7 @@ pub struct AdvanceRecurrencePatch {
 /// Re-position a node within the chain forest: place it under `parent_id`
 /// (None = a top-level root) immediately after sibling `after_id` (None = the
 /// head of that sibling group). One primitive covers link, unlink (parent =
-/// None), and reorder — and it is the write op a future AI chain editor would
-/// call to push/pop/alter the parent/previous/next structure.
+/// None), and reorder.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MovePatch {
@@ -169,9 +167,7 @@ pub struct MovePatch {
     pub updated_at: String,
 }
 
-/// Retag a reminder from the chain view. Replaces the old category-correction
-/// patch: there is no auto-guess left to "fix", so this is straightforward
-/// editing rather than an escape hatch. Optional and non-destructive —
+/// Retag a reminder from the chain view. Optional and non-destructive —
 /// reminders work fine untagged.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,10 +182,9 @@ pub struct ReminderTagsPatch {
 /// whose prealert fired. Kept deliberately OUT of `reminder_nodes` — this is
 /// local-device scheduler bookkeeping, not user reminder data, so it never
 /// syncs to a Phase-2 phone and can be cleared independently (snooze / edit
-/// re-fire). Lived in WebView2 localStorage until S64; moved here so a cleared
-/// webview cache can no longer lose dedupe and re-fire historically-due
-/// prealerts. Missing fields deserialize to `false` / `[]`, so a partial record
-/// from the localStorage migration round-trips cleanly.
+/// re-fire). Stored here rather than in webview storage so a cleared cache
+/// can't lose dedupe and re-fire historically-due prealerts. Missing fields
+/// deserialize to `false` / `[]`, matching the frontend's optional fields.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FireRecord {
@@ -244,10 +239,10 @@ impl ReminderStore {
     /// an update, so a bad migration would be silent and unrecoverable. One
     /// rolling backup per source version (`linodea.v2.bak`) bounds disk use.
     ///
-    /// Best-effort by design: every migration today is purely additive
-    /// (`ADD COLUMN` / `CREATE TABLE IF NOT EXISTS`), so a failed copy isn't
-    /// worth refusing to start over. **If a future migration ever drops or
-    /// rewrites data, make this fail-closed (return Err) before shipping it.**
+    /// Best-effort: a failed copy does not stop the app from starting. Note that
+    /// v4 already drops a column (after carrying its value into `tags_json`).
+    /// **Before shipping another migration that drops or rewrites data, make
+    /// this fail-closed (return Err).**
     fn backup_before_upgrade(&self) {
         let existing = self.recorded_schema_version();
         if existing >= CURRENT_SCHEMA_VERSION {
