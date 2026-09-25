@@ -18,9 +18,6 @@ function AlertsSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const alertsSettingsSection: SettingsSectionDescriptor = {
   id: "alerts",
-  // Sits right after Notifications (20): prealerts decide *when* a reminder
-  // speaks up, this decides *how loudly*.
-  order: 25,
   title: (s) => s.settings.alerts.title,
   hint: (s) => s.settings.alerts.hint,
   Component: AlertsSettingsContent,

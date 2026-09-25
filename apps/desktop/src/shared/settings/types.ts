@@ -2,9 +2,9 @@
  * Shared settings types — the contract between features and the settings page.
  *
  * Each feature that contributes a Settings UI exports a
- * `SettingsSectionDescriptor`. The descriptor is collected in
- * `pages/settings/sectionRegistry.ts` and the SettingsPage renders them in
- * `order`.
+ * `SettingsSectionDescriptor`. The descriptors are listed in
+ * `pages/settings/sectionRegistry.ts`, in the order the SettingsPage renders
+ * them.
  *
  * The bundle is the union of every feature's state + setters, passed down by
  * the SettingsPage so each section can pick what it needs without prop
@@ -58,15 +58,12 @@ export interface SettingsBundle {
  * Self-describing settings section. Each feature exports one of these.
  *
  *   - `id` is stable, used as React key and for any later persistence.
- *   - `order` controls visual position (lower = earlier). Convention: 10, 20,
- *     30, 40 with gaps so new sections can be inserted between.
  *   - `title` and `hint` are selectors so they can interpolate from strings.
  *   - `Component` is rendered inside the SettingsSection wrapper; it receives
  *     the full bundle and picks what it needs.
  */
 export interface SettingsSectionDescriptor {
   id: string;
-  order: number;
   title: (s: Strings) => string;
   hint: (s: Strings) => string;
   Component: ComponentType<{ bundle: SettingsBundle }>;

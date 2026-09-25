@@ -36,7 +36,6 @@ function StartupSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const startupSettingsSection: SettingsSectionDescriptor = {
   id: "startup",
-  order: 40,
   title: (s) => s.settings.startup.title,
   hint: (s) => s.settings.startup.hint,
   Component: StartupSettingsContent,

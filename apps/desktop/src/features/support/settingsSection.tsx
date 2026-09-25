@@ -10,7 +10,6 @@ function SupportSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const supportSettingsSection: SettingsSectionDescriptor = {
   id: "support",
-  order: 70,
   title: (strings) => strings.settings.support.title,
   hint: (strings) => strings.settings.support.hint,
   Component: SupportSettingsContent,

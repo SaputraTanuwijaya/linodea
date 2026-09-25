@@ -12,7 +12,6 @@ function AppUpdateSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const appUpdateSettingsSection: SettingsSectionDescriptor = {
   id: "updates",
-  order: 60,
   title: (strings) => strings.settings.updates.title,
   hint: (strings) => strings.settings.updates.hint,
   Component: AppUpdateSettingsContent,

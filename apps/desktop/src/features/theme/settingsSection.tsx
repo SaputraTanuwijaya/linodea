@@ -21,7 +21,6 @@ function ThemeSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const themeSettingsSection: SettingsSectionDescriptor = {
   id: "theme",
-  order: 10,
   title: (s) => s.settings.appearance.title,
   hint: (s) => s.settings.appearance.hint,
   Component: ThemeSettingsContent,

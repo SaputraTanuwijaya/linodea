@@ -8,7 +8,6 @@ function AiAssistSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const aiAssistSettingsSection: SettingsSectionDescriptor = {
   id: "ai-assist",
-  order: 50,
   title: (strings) => strings.settings.ai.title,
   hint: (strings) => strings.settings.ai.hint,
   Component: AiAssistSettingsContent,

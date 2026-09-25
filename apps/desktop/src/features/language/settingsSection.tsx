@@ -17,7 +17,6 @@ function LanguageSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const languageSettingsSection: SettingsSectionDescriptor = {
   id: "language",
-  order: 30,
   title: (s) => s.settings.language.title,
   hint: (s) => s.settings.language.hint,
   Component: LanguageSettingsContent,

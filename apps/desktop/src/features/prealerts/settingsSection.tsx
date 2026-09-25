@@ -21,7 +21,6 @@ function PrealertsSettingsContent({ bundle }: { bundle: SettingsBundle }) {
 
 export const prealertsSettingsSection: SettingsSectionDescriptor = {
   id: "prealerts",
-  order: 20,
   title: (s) => s.settings.notifications.title,
   hint: (s) => s.settings.notifications.hint(MAX_PREALERTS),
   Component: PrealertsSettingsContent,
