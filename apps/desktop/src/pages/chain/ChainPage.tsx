@@ -34,7 +34,7 @@ import {
 } from "@/entities/reminder";
 import { tagColor } from "@/shared/config";
 import type { Strings } from "@/shared/i18n";
-import { formatDateTime, isTauriRuntime } from "@/shared/lib";
+import { formatDateTime, isTauriRuntime, useDismiss } from "@/shared/lib";
 import {
   MAX_TAGS_PER_REMINDER,
   normalizeTag,
@@ -168,24 +168,7 @@ export function ChainPage({
     void refresh();
   }, [refresh, refreshKey]);
 
-  // Close the tag menu on outside click / Escape.
-  useEffect(() => {
-    if (!tagMenu) return;
-    function onMouseDown(event: globalThis.MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setTagMenu(null);
-      }
-    }
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setTagMenu(null);
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [tagMenu]);
+  useDismiss(menuRef, tagMenu !== null, () => setTagMenu(null));
 
   /** Every tag in use, for the popover's quick-pick list. */
   const tagsInUse = useMemo(() => collectTagsInUse(chains), [chains]);

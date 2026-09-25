@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { isTauriRuntime } from "@/shared/lib";
+import { isTauriRuntime, useDismiss } from "@/shared/lib";
 
 import type { MenuAction, MenuAnchor, PopupMenuMode } from "../ui/PopupMenu";
 
@@ -41,24 +41,7 @@ export function usePopupMenu(mode: PopupMenuMode, dismissSignal?: unknown) {
     setAnchor(null);
   }, [dismissSignal]);
 
-  useEffect(() => {
-    if (!anchor) return;
-
-    function onMouseDown(event: globalThis.MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setAnchor(null);
-      }
-    }
-    function onKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") setAnchor(null);
-    }
-    document.addEventListener("mousedown", onMouseDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [anchor]);
+  useDismiss(menuRef, anchor !== null, () => setAnchor(null));
 
   async function openMenuAt(x: number, y: number) {
     if (mode === "capture" && isTauriRuntime()) {

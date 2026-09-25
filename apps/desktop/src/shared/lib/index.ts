@@ -9,4 +9,5 @@ export { getDeviceId } from "./device";
 export { openFeedbackForm } from "./feedback";
 export { isTauriRuntime } from "./runtime";
 export { playUiSound } from "./sounds";
+export { useDismiss } from "./useDismiss";
 export { useTauriEvent } from "./useTauriEvent";
