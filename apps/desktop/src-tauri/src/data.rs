@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS reminder_fire_state (
 );
 "#;
 
+/// Every column `reminder_from_row` reads (it reads them by name). Queries
+/// append their own WHERE / ORDER BY.
+const SELECT_REMINDERS: &str = r#"
+SELECT
+  id, user_id, title, raw_input, description, scheduled_at, timezone,
+  reminder_type, status, tags_json, parent_id, previous_id, next_id,
+  checklist_json, recurrence_json, confidence, created_at, updated_at,
+  completed_at, snoozed_until, created_on_device_id, sync_version
+FROM reminder_nodes"#;
+
 /// Repeat rule for a recurring reminder, stored as JSON in `recurrence_json`.
 /// Mirrors the `Recurrence` shape in `@linodea/types`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,47 +341,15 @@ impl ReminderStore {
     pub fn list_reminders(&self) -> Result<Vec<ReminderNode>, String> {
         let mut statement = self
             .connection
-            .prepare(
-                r#"
-                SELECT
-                  id,
-                  user_id,
-                  title,
-                  raw_input,
-                  description,
-                  scheduled_at,
-                  timezone,
-                  reminder_type,
-                  status,
-                  tags_json,
-                  parent_id,
-                  previous_id,
-                  next_id,
-                  checklist_json,
-                  recurrence_json,
-                  confidence,
-                  created_at,
-                  updated_at,
-                  completed_at,
-                  snoozed_until,
-                  created_on_device_id,
-                  sync_version
-                FROM reminder_nodes
-                ORDER BY scheduled_at ASC, created_at ASC
-                "#,
-            )
+            .prepare(&format!(
+                "{SELECT_REMINDERS} ORDER BY scheduled_at ASC, created_at ASC"
+            ))
             .map_err(to_store_error)?;
 
         let rows = statement
             .query_map([], reminder_from_row)
             .map_err(to_store_error)?;
-        let mut reminders = Vec::new();
-
-        for row in rows {
-            reminders.push(row.map_err(to_store_error)?);
-        }
-
-        Ok(reminders)
+        rows.collect::<Result<Vec<_>, _>>().map_err(to_store_error)
     }
 
     pub fn update_reminder_status(
@@ -818,27 +796,12 @@ impl ReminderStore {
                 .map_err(to_store_error)?;
         }
 
-        self.connection
-            .execute(
-                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![1, "base_reminder_nodes"],
-            )
-            .map_err(to_store_error)?;
-        self.connection
-            .execute(
-                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![2, "add_recurrence"],
-            )
-            .map_err(to_store_error)?;
+        self.record_migration(1, "base_reminder_nodes")?;
+        self.record_migration(2, "add_recurrence")?;
         // v3: the `reminder_fire_state` table is created by the base SCHEMA above
         // (idempotent `CREATE TABLE IF NOT EXISTS`), so existing DBs pick it up on
         // the next open — only the migration marker is recorded here.
-        self.connection
-            .execute(
-                "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![3, "add_reminder_fire_state"],
-            )
-            .map_err(to_store_error)?;
+        self.record_migration(3, "add_reminder_fire_state")?;
 
         // v4: `category` → `tags_json`, following the same state-based pattern as
         // v2 — guarded by what the table actually contains, never by the recorded
@@ -880,14 +843,20 @@ impl ReminderStore {
                 .map_err(to_store_error)?;
         }
 
+        self.record_migration(CURRENT_SCHEMA_VERSION, "replace_category_with_tags")?;
+
+        Ok(())
+    }
+
+    /// Record a migration as applied. Idempotent, so every open can call it.
+    fn record_migration(&self, version: i64, name: &str) -> Result<(), String> {
         self.connection
             .execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2)",
-                params![CURRENT_SCHEMA_VERSION, "replace_category_with_tags"],
+                params![version, name],
             )
-            .map_err(to_store_error)?;
-
-        Ok(())
+            .map(|_| ())
+            .map_err(to_store_error)
     }
 
     fn column_exists(&self, table: &str, column: &str) -> Result<bool, String> {
@@ -908,35 +877,7 @@ impl ReminderStore {
     fn get_reminder_by_id(&self, id: &str) -> Result<Option<ReminderNode>, String> {
         let mut statement = self
             .connection
-            .prepare(
-                r#"
-                SELECT
-                  id,
-                  user_id,
-                  title,
-                  raw_input,
-                  description,
-                  scheduled_at,
-                  timezone,
-                  reminder_type,
-                  status,
-                  tags_json,
-                  parent_id,
-                  previous_id,
-                  next_id,
-                  checklist_json,
-                  recurrence_json,
-                  confidence,
-                  created_at,
-                  updated_at,
-                  completed_at,
-                  snoozed_until,
-                  created_on_device_id,
-                  sync_version
-                FROM reminder_nodes
-                WHERE id = ?1
-                "#,
-            )
+            .prepare(&format!("{SELECT_REMINDERS} WHERE id = ?1"))
             .map_err(to_store_error)?;
 
         let mut rows = statement.query(params![id]).map_err(to_store_error)?;
@@ -958,35 +899,10 @@ impl ReminderStore {
 }
 
 fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> {
-    let tags_json: String = row.get("tags_json")?;
-    let tags = serde_json::from_str(&tags_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            tags_json.len(),
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
-    })?;
-
-    let checklist_json: String = row.get("checklist_json")?;
-    let checklist = serde_json::from_str(&checklist_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            checklist_json.len(),
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
-    })?;
-
-    let recurrence_json: Option<String> = row.get("recurrence_json")?;
-    let recurrence = match recurrence_json {
-        Some(raw) if !raw.trim().is_empty() => {
-            Some(serde_json::from_str(&raw).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    raw.len(),
-                    rusqlite::types::Type::Text,
-                    Box::new(error),
-                )
-            })?)
-        }
+    let tags = json_column(&row.get::<_, String>("tags_json")?)?;
+    let checklist = json_column(&row.get::<_, String>("checklist_json")?)?;
+    let recurrence = match row.get::<_, Option<String>>("recurrence_json")? {
+        Some(raw) if !raw.trim().is_empty() => Some(json_column(&raw)?),
         _ => None,
     };
 
@@ -1013,6 +929,18 @@ fn reminder_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReminderNode> 
         snoozed_until: row.get("snoozed_until")?,
         created_on_device_id: row.get("created_on_device_id")?,
         sync_version: row.get("sync_version")?,
+    })
+}
+
+/// Decode a JSON text column, reporting a malformed value as a column
+/// conversion error rather than panicking.
+fn json_column<T: serde::de::DeserializeOwned>(raw: &str) -> rusqlite::Result<T> {
+    serde_json::from_str(raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            raw.len(),
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
     })
 }
 
