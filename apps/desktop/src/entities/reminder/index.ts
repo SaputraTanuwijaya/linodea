@@ -32,7 +32,6 @@ export {
 export {
   clearReminderFireRecord,
   enableReminderNotifications,
-  getNotificationPermissionState,
   notifyDueReminders,
   type DueNotificationResult,
   type NotificationPermissionState,

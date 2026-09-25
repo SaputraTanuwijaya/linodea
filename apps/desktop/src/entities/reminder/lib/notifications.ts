@@ -91,7 +91,6 @@ export interface DueNotificationResult {
    * read the reminders before this async pass wrote the new status.
    */
   newlyMissed: number;
-  permissionGranted: boolean;
   /**
    * Epoch-ms of the earliest still-unfired prealert or due fire across all
    * actionable reminders, or `undefined` if nothing is pending. The scheduler
@@ -102,10 +101,6 @@ export interface DueNotificationResult {
 
 /** In-memory snapshot of the fire-dedupe store for one scheduler pass. */
 type FireStore = Record<string, FireRecord>;
-
-export async function getNotificationPermissionState(): Promise<NotificationPermissionState> {
-  return (await isPermissionGranted()) ? "granted" : "unknown";
-}
 
 export async function enableReminderNotifications(): Promise<NotificationPermissionState> {
   if (await isPermissionGranted()) {
@@ -127,11 +122,6 @@ export async function enableReminderNotifications(): Promise<NotificationPermiss
  *     Done click; an unacknowledged fire stays pending + overdue, never `done`).
  */
 export async function notifyDueReminders(): Promise<DueNotificationResult> {
-  // The custom Linodea alert window does not depend on OS notification
-  // permission (that gate is only relevant to the deferred app-off OS-toast
-  // fallback), so we never block firing on it.
-  const permissionGranted = await isPermissionGranted().catch(() => false);
-
   const reminders = await listReminderNodes();
   const actionable = reminders.filter(isActionable);
   const sortedOffsets = sortDescending(getStoredPrealerts().offsets);
@@ -295,7 +285,6 @@ export async function notifyDueReminders(): Promise<DueNotificationResult> {
     sentCount,
     missedCount,
     newlyMissed,
-    permissionGranted,
     nextFireMs: Number.isFinite(nextFireMs) ? nextFireMs : undefined,
   };
 }
