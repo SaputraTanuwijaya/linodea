@@ -10,11 +10,8 @@
  * file is one layer up, so importing from `features/*` is allowed.)
  *
  * Dedupe is stored in SQLite (the `reminder_fire_state` table), keyed
- * per-reminder, per-stage. It lived in WebView2 localStorage until S64 — moved
- * so a cleared webview cache can't lose dedupe and re-fire historically-due
- * prealerts. Any records left in the old localStorage keys are migrated into
- * SQLite once, on the first pass of a session (`migrateLocalFireStoreOnce`),
- * which also absorbs the even older v1 store (array of "fired due" ids).
+ * per-reminder, per-stage, so a cleared webview cache can't lose it and re-fire
+ * historically-due prealerts.
  */
 
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
@@ -56,9 +53,6 @@ function showAlert(payload: AlertPayload): void {
   }).catch(() => undefined);
 }
 
-// Legacy localStorage keys, kept only for the one-time migration into SQLite.
-const FIRES_STORAGE_KEY = "linodea.notifiedFires.v2";
-const LEGACY_DUE_IDS_KEY = "linodea.notifiedDueReminderIds.v1";
 const MS_PER_MINUTE = 60_000;
 /**
  * Boundary between a *late-fire* and a *missed* reminder — the OS-sleep / app-off
@@ -312,13 +306,9 @@ export async function clearReminderFireRecord(id: string): Promise<void> {
   await clearReminderFireRecordCommand(id).catch(() => undefined);
 }
 
-/** Set once the one-time localStorage→SQLite migration has run this session. */
-let localFireStoreMigrated = false;
-
-/** Read the fire-dedupe store from SQLite, migrating any legacy localStorage
- * records into it first. Returns an empty store if the read fails. */
+/** Read the fire-dedupe store from SQLite. Returns an empty store if the read
+ * fails. */
 async function readFireStore(): Promise<FireStore> {
-  await migrateLocalFireStoreOnce();
   try {
     return await getReminderFireRecords();
   } catch {
@@ -326,58 +316,4 @@ async function readFireStore(): Promise<FireStore> {
     // the 15s backstop, retries. Callers only ever add records, never clobber.
     return {};
   }
-}
-
-/**
- * One-time move of any pre-S64 fire records still sitting in WebView2
- * localStorage into SQLite, then delete the old keys so it never runs again.
- * Idempotent: a fresh/migrated install reads nothing and just flips the flag.
- * If a write fails the flag stays false and localStorage is left intact, so a
- * later pass retries. Runs only after `listReminderNodes` proved IPC is up.
- */
-async function migrateLocalFireStoreOnce(): Promise<void> {
-  if (localFireStoreMigrated) return;
-  try {
-    for (const [id, record] of Object.entries(readLegacyLocalFireStore())) {
-      await setReminderFireRecord(id, record);
-    }
-    localStorage.removeItem(FIRES_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_DUE_IDS_KEY);
-    localFireStoreMigrated = true;
-  } catch {
-    // Leave the flag false and localStorage intact; retry on a later pass.
-  }
-}
-
-/**
- * Parse any pre-S64 fire records out of localStorage: the v2 object store, or
- * the even older v1 array of "fired due" ids. Read-only — the caller removes
- * the keys after a successful SQLite import.
- */
-function readLegacyLocalFireStore(): FireStore {
-  try {
-    const raw = localStorage.getItem(FIRES_STORAGE_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as FireStore;
-      }
-    }
-    const legacy = localStorage.getItem(LEGACY_DUE_IDS_KEY);
-    if (legacy) {
-      const ids: unknown = JSON.parse(legacy);
-      if (Array.isArray(ids)) {
-        const migrated: FireStore = {};
-        for (const id of ids) {
-          if (typeof id === "string") {
-            migrated[id] = { due: true };
-          }
-        }
-        return migrated;
-      }
-    }
-  } catch {
-    // Ignore parse failures — nothing to migrate.
-  }
-  return {};
 }

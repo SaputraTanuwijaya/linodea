@@ -13,7 +13,7 @@
  * an unacknowledged fire stays pending + overdue, never silently `done`.
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReminderNode } from "@linodea/types";
 import type { FireRecord } from "../api/commands";
 
@@ -129,23 +129,6 @@ function makeReminder(overrides: Partial<ReminderNode> = {}): ReminderNode {
     ...overrides,
   };
 }
-
-beforeAll(() => {
-  // notifications.ts touches localStorage in its one-time legacy migration; the
-  // node env has none, so give it a minimal in-memory stub (starts empty → the
-  // migration is a clean no-op).
-  const store = new Map<string, string>();
-  globalThis.localStorage = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-    key: () => null,
-    get length() {
-      return store.size;
-    },
-  } as Storage;
-});
 
 beforeEach(() => {
   H.reminders = [];
