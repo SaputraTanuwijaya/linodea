@@ -1,6 +1,6 @@
 [package]
 name = "linodea-desktop"
-version = "0.1.5"
+version = "0.1.6"
 license = "PolyForm-Noncommercial-1.0.0"
 description = "Linodea desktop app"
 authors = ["Saputra Tanuwijaya"]
