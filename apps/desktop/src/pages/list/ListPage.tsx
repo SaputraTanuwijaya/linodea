@@ -278,13 +278,9 @@ export function ListPage({
                   </p>
                   <p className="flex items-center gap-1.5 truncate text-xs text-[var(--lin-text-dim)]">
                     {reminder.status === "missed" ? (
-                      <span className="flex-none rounded bg-[var(--lin-danger-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--lin-danger)]">
-                        {strings.list.missed}
-                      </span>
+                      <LateLabel color="var(--lin-danger)" text={strings.list.missed} />
                     ) : isOverdue(reminder, now) ? (
-                      <span className="flex-none rounded bg-[var(--lin-warning-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--lin-warning)]">
-                        {strings.list.overdue}
-                      </span>
+                      <LateLabel color="var(--lin-warning)" text={strings.list.overdue} />
                     ) : null}
                     <span className="truncate">
                       {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
@@ -337,6 +333,20 @@ function isOverdue(reminder: ReminderNode, now: number): boolean {
   if (reminder.status === "missed") return false;
   const due = new Date(reminder.snoozedUntil ?? reminder.scheduledAt).getTime();
   return Number.isFinite(due) && due < now;
+}
+
+/** "Missed" / "Overdue" as coloured text leading the time: `Missed · 26 Sep, 08.00`. */
+function LateLabel({ color, text }: { color: string; text: string }) {
+  return (
+    <>
+      <span className="flex-none font-medium" style={{ color }}>
+        {text}
+      </span>
+      <span aria-hidden className="flex-none">
+        ·
+      </span>
+    </>
+  );
 }
 
 function RowButton({

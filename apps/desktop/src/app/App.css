@@ -46,10 +46,9 @@ body,
      --lin-text-dim    : secondary text (preview line, hints)
      --lin-text-mute   : placeholder / disabled
      --lin-accent      : hover/active highlight
-     --lin-danger      : destructive text (Quit)
+     --lin-danger      : destructive text (Delete, Missed)
      --lin-danger-bg   : destructive hover background
-     --lin-warning     : attention text (Overdue tag)
-     --lin-warning-bg  : attention tag background
+     --lin-warning     : attention text (Overdue)
      --lin-timer-track : countdown progress bar, unelapsed portion
      --lin-timer-fill  : countdown progress bar gradient (cool -> hot)
    --------------------------------------------------------------- */
@@ -69,7 +68,6 @@ body,
   --lin-danger: rgb(252 165 165);
   --lin-danger-bg: rgb(136 19 55 / 0.3);
   --lin-warning: rgb(251 191 36);
-  --lin-warning-bg: rgb(120 53 15 / 0.3);
 
   /* Tag palette (chain view grouping + dots). A tag hashes into a numbered
      slot — see shared/config/tags.ts — so the slots are deliberately unnamed;
@@ -107,7 +105,6 @@ body,
   --lin-danger: rgb(190 18 60);
   --lin-danger-bg: rgb(254 226 226);
   --lin-warning: rgb(180 83 9);
-  --lin-warning-bg: rgb(254 243 199);
 
   /* Darker shades for contrast on the light surface. */
   --lin-tag-1: rgb(37 99 235);
