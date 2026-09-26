@@ -12,7 +12,13 @@
 import { describe, expect, it } from "vitest";
 import type { ChainNode, ReminderNode } from "@linodea/types";
 
-import { collectTagsInUse, groupChainsByTag, primaryTag, UNTAGGED } from "./reminder";
+import {
+  collectTagsInUse,
+  groupChainsByTag,
+  isCountdown,
+  primaryTag,
+  UNTAGGED,
+} from "./reminder";
 
 function node(id: string, tags: string[]): ReminderNode {
   return {
@@ -98,5 +104,13 @@ describe("collectTagsInUse", () => {
 
   it("ignores untagged reminders rather than emitting an empty string", () => {
     expect(collectTagsInUse([chain("a", []), chain("b", ["kerja"])])).toEqual(["kerja"]);
+  });
+});
+
+describe("isCountdown", () => {
+  it("reads the /countdown command back from the raw input", () => {
+    const countdown = { ...node("timer", []), rawInput: "/countdown 5 menit lagi angkat jemuran" };
+    expect(isCountdown(countdown)).toBe(true);
+    expect(isCountdown({ ...node("plain", []), rawInput: "besok jam 7 pagi olahraga" })).toBe(false);
   });
 });

@@ -19,6 +19,7 @@ export {
   createReminderNode,
   groupChainsByTag,
   isActionable,
+  isCountdown,
   primaryTag,
 } from "./model/reminder";
 export { clearReminderFireRecord } from "./lib/notifications";

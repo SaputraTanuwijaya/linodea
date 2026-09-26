@@ -19,6 +19,7 @@ import {
   clearReminderFireRecord,
   deleteReminderNode,
   isActionable,
+  isCountdown,
   listReminderNodes,
   updateReminderNode,
   updateReminderNodeStatus,
@@ -278,9 +279,11 @@ export function ListPage({
                   </p>
                   <p className="flex items-center gap-1.5 truncate text-xs text-[var(--lin-text-dim)]">
                     {reminder.status === "missed" ? (
-                      <LateLabel color="var(--lin-danger)" text={strings.list.missed} />
+                      <StatusLabel color="var(--lin-danger)" text={strings.list.missed} />
                     ) : isOverdue(reminder, now) ? (
-                      <LateLabel color="var(--lin-warning)" text={strings.list.overdue} />
+                      <StatusLabel color="var(--lin-warning)" text={strings.list.overdue} />
+                    ) : isCountdown(reminder) ? (
+                      <StatusLabel color="var(--lin-text)" text={strings.timer.caption} />
                     ) : null}
                     <span className="truncate">
                       {formatDateTime(reminder.snoozedUntil ?? reminder.scheduledAt)}
@@ -335,8 +338,11 @@ function isOverdue(reminder: ReminderNode, now: number): boolean {
   return Number.isFinite(due) && due < now;
 }
 
-/** "Missed" / "Overdue" as coloured text leading the time: `Missed · 26 Sep, 08.00`. */
-function LateLabel({ color, text }: { color: string; text: string }) {
+/**
+ * A state word leading the row's time: `Missed · 26 Sep, 08.00`. Missed and
+ * Overdue win over Countdown — once a countdown is late, lateness is the news.
+ */
+function StatusLabel({ color, text }: { color: string; text: string }) {
   return (
     <>
       <span className="flex-none font-medium" style={{ color }}>

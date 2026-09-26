@@ -28,6 +28,7 @@ import {
   collectTagsInUse,
   deleteReminderNode,
   groupChainsByTag,
+  isCountdown,
   listReminderChains,
   primaryTag,
   setReminderTags,
@@ -401,9 +402,6 @@ function TagChains({
         </svg>
         {rows.map((row) => {
           const isDone = row.node.status === "done" || row.node.status === "cancelled";
-          const meta = row.node.recurrence
-            ? `${formatDateTime(row.node.snoozedUntil ?? row.node.scheduledAt)} · ↻ ${strings.recurrence.describe(row.node.recurrence)}`
-            : formatDateTime(row.node.snoozedUntil ?? row.node.scheduledAt);
           return (
             <div
               className="relative flex items-center"
@@ -443,7 +441,18 @@ function TagChains({
                 </span>
               ))}
               <span className="ml-3 flex-1 whitespace-nowrap text-right text-xs text-[var(--lin-text-dim)]">
-                {meta}
+                {isCountdown(row.node) ? (
+                  <>
+                    <span className="font-medium text-[var(--lin-text)]">
+                      {strings.timer.caption}
+                    </span>
+                    {" · "}
+                  </>
+                ) : null}
+                {formatDateTime(row.node.snoozedUntil ?? row.node.scheduledAt)}
+                {row.node.recurrence
+                  ? ` · ↻ ${strings.recurrence.describe(row.node.recurrence)}`
+                  : null}
               </span>
             </div>
           );

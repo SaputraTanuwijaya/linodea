@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addRecurrenceInterval,
+  hasCountdownCommand,
   parseAnchorLink,
   parseReminderWithNow,
 } from "../dist/index.js";
@@ -296,6 +297,14 @@ test("/countdown keeps the exact second and is stripped from the title", () => {
   assert.ok(!/countdown/i.test(result.draft.title));
   // Flag surfaced so the capture UI can show the countdown timer window.
   assert.equal(result.countdown, true);
+});
+
+test("hasCountdownCommand matches /countdown only as a standalone token", () => {
+  assert.equal(hasCountdownCommand("/countdown 5 menit lagi angkat jemuran"), true);
+  assert.equal(hasCountdownCommand("in 2m standup /COUNTDOWN"), true);
+  assert.equal(hasCountdownCommand("besok jam 7 pagi olahraga"), false);
+  assert.equal(hasCountdownCommand("baca /countdowns nanti"), false);
+  assert.equal(hasCountdownCommand("a/countdown 5m"), false);
 });
 
 test("/countdown works regardless of position in the input", () => {

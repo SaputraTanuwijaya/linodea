@@ -4,7 +4,7 @@
  * Pure transforms over reminder data — no React, no I/O.
  */
 
-import type { AnchorLinkResult } from "@linodea/parser";
+import { hasCountdownCommand, type AnchorLinkResult } from "@linodea/parser";
 import type { ChainNode, ReminderNode, ReminderParseResult } from "@linodea/types";
 
 /** Section key for reminders with no tags. Not a valid tag — `normalizeTag`
@@ -130,6 +130,12 @@ export function createLinkedReminderNode(
     createdOnDeviceId: deviceId,
     syncVersion: 0,
   };
+}
+
+/** Captured with `/countdown` — the reminder behind the on-screen timer. The
+ *  flag isn't stored, so it is read back from the raw input the user typed. */
+export function isCountdown(reminder: ReminderNode): boolean {
+  return hasCountdownCommand(reminder.rawInput);
 }
 
 /** A reminder still in play — not done, not cancelled. */

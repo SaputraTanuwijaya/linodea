@@ -166,6 +166,14 @@ const COUNTDOWN_PATTERN = new RegExp(
   "i",
 );
 
+/**
+ * Whether `input` uses the `/countdown` command. Exported for callers that only
+ * have a stored raw input — the desktop labels countdown reminders from it.
+ */
+export function hasCountdownCommand(input: string): boolean {
+  return COUNTDOWN_PATTERN.test(input);
+}
+
 function roundToMinute(ms: number): number {
   return Math.round(ms / 60_000) * 60_000;
 }
@@ -188,7 +196,7 @@ export function parseReminderWithNow(
   const rawNormalized = normalizeReminderInput(rawInput);
   // Pull the `/countdown` keyword out before any other parsing so it can't
   // pollute the title; remember it to skip minute-snapping below.
-  const countdown = COUNTDOWN_PATTERN.test(rawNormalized);
+  const countdown = hasCountdownCommand(rawNormalized);
   const normalizedInput = countdown
     ? normalizeReminderInput(rawNormalized.replace(COUNTDOWN_PATTERN, " "))
     : rawNormalized;
