@@ -62,7 +62,6 @@ export function ConfirmPage() {
         primaryLabel: strings.quitConfirm.cancel, // "Keep running" — recommended
         primaryConfirmed: false,
         secondaryLabel: strings.quitConfirm.confirm, // "Quit anyway"
-        secondaryDanger: true,
       };
     }
     if (kind === "autostart") {
@@ -72,7 +71,6 @@ export function ConfirmPage() {
         primaryLabel: strings.autostartPrompt.enable, // "Yes" — recommended
         primaryConfirmed: true,
         secondaryLabel: strings.autostartPrompt.notNow,
-        secondaryDanger: false,
       };
     }
     if (kind === "autostartOff") {
@@ -82,7 +80,6 @@ export function ConfirmPage() {
         primaryLabel: strings.disableAutostartConfirm.keepOn, // recommended
         primaryConfirmed: false,
         secondaryLabel: strings.disableAutostartConfirm.turnOff,
-        secondaryDanger: true,
       };
     }
     return null;
@@ -121,12 +118,7 @@ export function ConfirmPage() {
         </div>
         <div className="flex items-center justify-end gap-2">
           <button
-            className={
-              "h-8 rounded-md border border-[var(--lin-border)] px-3 text-xs font-medium transition " +
-              (view.secondaryDanger
-                ? "text-[var(--lin-danger)] hover:bg-[var(--lin-danger-bg)]"
-                : "text-[var(--lin-text)] hover:bg-[var(--lin-bg-hover)]")
-            }
+            className="h-8 rounded-md border border-[var(--lin-border)] px-3 text-xs font-medium text-[var(--lin-text)] transition hover:bg-[var(--lin-bg-hover)]"
             onClick={() => resolve(!view.primaryConfirmed)}
             type="button"
           >

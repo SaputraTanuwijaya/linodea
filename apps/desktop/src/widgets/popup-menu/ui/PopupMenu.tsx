@@ -76,11 +76,7 @@ export function PopupMenu({
       />
       <div className="my-1 h-px bg-[var(--lin-border)]" />
       <MenuItem label={strings.menu.hide} onClick={() => onAction("hide")} />
-      <MenuItem
-        label={strings.menu.quit}
-        onClick={() => onAction("quit")}
-        variant="danger"
-      />
+      <MenuItem label={strings.menu.quit} onClick={() => onAction("quit")} />
     </div>
   );
 }
@@ -92,7 +88,6 @@ function MenuItem({
   dotLabel,
   label,
   onClick,
-  variant,
 }: {
   badge?: number;
   disabled?: boolean;
@@ -101,15 +96,12 @@ function MenuItem({
   dotLabel?: string;
   label: string;
   onClick: () => void;
-  variant?: "danger";
 }) {
   const base =
     "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition disabled:cursor-default";
   const tone = disabled
     ? "text-[var(--lin-text-mute)]"
-    : variant === "danger"
-      ? "text-[var(--lin-danger)] hover:bg-[var(--lin-danger-bg)]"
-      : "text-[var(--lin-text)] hover:bg-[var(--lin-bg-hover)]";
+    : "text-[var(--lin-text)] hover:bg-[var(--lin-bg-hover)]";
 
   return (
     <button
